@@ -16,6 +16,7 @@ import {
   hasRef,
   isAncestor,
   projectOf,
+  type ResultFix,
   type RunGateInput,
   readGateConfig,
   reclaimEnvironments,
@@ -43,7 +44,12 @@ import type { EnvironmentLimiter } from "../environments.ts";
 import type { PushFn } from "../push.ts";
 import { sanitizeRawLine } from "../raw-log.ts";
 import type { RepoStore } from "../repos.ts";
-import type { Slot, SlotManager } from "../slots.ts";
+import {
+  type FailSalvage,
+  readLatestSalvageDiff,
+  type Slot,
+  type SlotManager,
+} from "../slots.ts";
 import type { SnapshotStore } from "../snapshots.ts";
 
 export interface ExecutorDeps {
@@ -56,14 +62,22 @@ export interface ExecutorDeps {
   // What an integration environment needs: docker, and the limit on how many a worker runs at once.
   docker?: DockerCli;
   environments?: EnvironmentLimiter;
-  makeAgentRunner(slotDir: string, runId?: string): AgentRunner;
+  makeAgentRunner(
+    slotDir: string,
+    runId?: string,
+    logDir?: string,
+  ): AgentRunner;
   makeGateSandbox(slotDir: string, runId?: string): GateSandbox;
   tmpRoot?: string;
+  // Worker home sandbox-logs; the per-run /afk-out dir is created inside it.
+  sandboxLogsRoot?: string;
   model?: string; // the worker's own model: what a project that sets none gets
   skillsSha?: string; // the skills version the worker checked at start-up; recorded on every agent Run
   secrets?: readonly string[]; // kept out of the raw event lines that are uploaded
   // A push that hit the network waits this long before retrying; tests replace it so they do not wait out 10–180 s.
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  // Where this worker keeps diffs of uncommitted work. The next agent Run mounts the last one at /context/salvage.diff.
+  salvageDir?: string;
 }
 
 export interface StageContext {
@@ -126,7 +140,7 @@ export function agentFacts(
     tokenUsage?: unknown;
     durationApiMs?: number;
     cursorCliVersion?: string;
-    resultFix?: "normalized" | "repaired";
+    resultFix?: ResultFix;
   },
 ) {
   return {
@@ -146,6 +160,7 @@ export class InfrastructureError extends Error {
   readonly extraRuns?: BilledFacts[];
   orphanRef?: string;
   orphanSha?: string;
+  salvage?: FailSalvage;
   constructor(message: string, run?: BilledFacts, extraRuns?: BilledFacts[]) {
     super(unrecoverableJobError(message) ?? message);
     this.run = run;
@@ -340,6 +355,10 @@ export async function renderFor(
     ? await fetchContracts(deps.repos, bundle.contracts)
     : [];
   const integration = bundle.integrationBranch;
+  const salvageDiff =
+    deps.salvageDir && !bundle.ticket?.restart
+      ? readLatestSalvageDiff(deps.salvageDir, bundle.agentBranch)
+      : undefined;
   renderContext({
     dir,
     bundle,
@@ -357,6 +376,7 @@ export async function renderFor(
     ...(integration
       ? { gate: readGateConfig(mainDir, tip(mainDir, integration)) }
       : {}),
+    ...(salvageDiff !== undefined ? { salvageDiff } : {}),
   });
   return dir;
 }

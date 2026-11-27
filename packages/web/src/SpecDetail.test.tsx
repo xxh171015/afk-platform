@@ -53,6 +53,7 @@ const view = (
       waitingMs: number;
       totalMs: number;
     } | null;
+    wastedAgentMs?: number;
     usageByStage?: {
       stage: string;
       inputTokens: number;
@@ -108,6 +109,7 @@ const view = (
   finalRuns: over.finalRuns ?? [],
   potentialConflicts: over.potentialConflicts ?? [],
   leadTime: over.leadTime ?? null,
+  wastedAgentMs: over.wastedAgentMs ?? 0,
   usageByStage: over.usageByStage ?? [],
   links: over.links ?? [],
   autoMerge: over.autoMerge,
@@ -1014,6 +1016,73 @@ describe("the spec page", () => {
     expect(screen.getByText(/已暂停: agent 时间用完/)).toBeTruthy();
   });
 
+  it("lists baseline-gate failures and offers 不管它继续", async () => {
+    const fake = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: {
+            state: "paused",
+            pauseReason: "baseline-gate-failed",
+            baselineFailures: [
+              {
+                repo: "backend",
+                reasons: ["test failed (exit 1)"],
+                failingTests: ["orders exports"],
+                run: { id: 7, displayId: "R-7" },
+              },
+            ],
+          },
+        }),
+      }),
+      "POST /specs/1/continue-baseline": () => ({
+        json: { state: "running" },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, fake);
+    expect(await screen.findByText(/已暂停: 基线门禁失败/)).toBeTruthy();
+    expect(
+      screen.getByTestId("baseline-failure-backend").textContent,
+    ).toContain("orders exports");
+    expect(screen.getByRole("link", { name: "R-7" }).getAttribute("href")).toBe(
+      "/runs/7",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "不管它继续" }));
+    await waitFor(() =>
+      expect(fake.calls).toContain("POST /specs/1/continue-baseline"),
+    );
+  });
+
+  it("offers 重新检查 beside 不管它继续 for a spec paused by baseline-gate-failed", async () => {
+    const fake = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: {
+            state: "paused",
+            pauseReason: "baseline-gate-failed",
+            baselineFailures: [
+              {
+                repo: "backend",
+                reasons: ["test failed (exit 1)"],
+                failingTests: ["orders exports"],
+                run: { id: 7, displayId: "R-7" },
+              },
+            ],
+          },
+        }),
+      }),
+      "POST /specs/1/recheck-baseline": () => ({
+        json: { state: "paused" },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, fake);
+    expect(await screen.findByText(/已暂停: 基线门禁失败/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "不管它继续" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重新检查" }));
+    await waitFor(() =>
+      expect(fake.calls).toContain("POST /specs/1/recheck-baseline"),
+    );
+  });
+
   it("shows 返工中 on the heading and the flow banner", async () => {
     renderWithApp(
       <SpecDetail specId={1} />,
@@ -1126,6 +1195,23 @@ describe("the spec page", () => {
     expect(usage.textContent).toContain("5,110,000");
     expect(usage.textContent).toContain("自审");
     expect(usage.textContent).toContain("76,000");
+  });
+
+  it("shows the spec's unproductive agent time on the overview", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            wastedAgentMs: 105_000,
+          }),
+        }),
+      }),
+    );
+    const wasted = await screen.findByTestId("wasted-agent");
+    expect(wasted.textContent).toContain("没有产出的 agent 时间");
+    expect(wasted.textContent).toContain("1m 45s");
   });
 
   it("shows the overall review of a finalizing spec", async () => {

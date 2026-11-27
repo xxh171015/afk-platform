@@ -277,8 +277,12 @@ await runWorker({
     },
     docker: realDocker,
     environments: new EnvironmentLimiter(),
-    makeAgentRunner: (slotDir, runId) =>
-      new SandcastleAgentRunner(sandcastle(slotDir, runId)),
+    sandboxLogsRoot: join(config.home, "sandbox-logs"),
+    makeAgentRunner: (slotDir, runId, logDir) =>
+      new SandcastleAgentRunner({
+        ...sandcastle(slotDir, runId),
+        ...(logDir ? { logDir } : {}),
+      }),
     // only the gate keeps package downloads between runs; agents never see the cache
     makeGateSandbox: (slotDir, runId) =>
       new SandcastleGateSandbox({
@@ -288,6 +292,7 @@ await runWorker({
     model: config.model,
     skillsSha: SKILLS_SHA, // what SANDBOX_SKILLS_DIR was copied at
     secrets: [config.cursorApiKey],
+    salvageDir: join(config.home, "salvage"),
   },
   concurrency: config.slots,
   signal: stop.signal,

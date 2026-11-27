@@ -789,6 +789,66 @@ describe("retry note", () => {
     const second = await nextBundle();
     expect(second.bundle.note).toBeNull();
   });
+
+  const salvage = {
+    commits: [
+      {
+        sha: "abc1111111111111111111111111111111111111",
+        subject: "export orders as csv",
+      },
+    ],
+    hadDiff: true,
+    diffTooLarge: false,
+  };
+
+  async function blockedByJobFailed() {
+    await runningSpec([ticket("a")]);
+    for (let i = 0; i < 3; i++) {
+      const job = (await worker.claim()).body.job as Claimed;
+      expect(job.payload.stage).toBe("implement");
+      expect(
+        (
+          await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+            salvage,
+          })
+        ).status,
+      ).toBe(200);
+    }
+    expect(await row(1)).toMatchObject({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+  }
+
+  it("puts the platform Retry note before a person's note after a job-failed retry", async () => {
+    await blockedByJobFailed();
+    const human = "use the helper in src/orders/csv.ts";
+    await call("POST", "/tickets/1/retry", { mode: "continue", note: human });
+    const { bundle } = await nextBundle();
+    expect(bundle.note).toContain("平台自动重试");
+    expect(bundle.note).toContain("export orders as csv");
+    expect(bundle.note).toContain(human);
+    expect(bundle.note.indexOf("平台自动重试")).toBeLessThan(
+      bundle.note.indexOf(human),
+    );
+  });
+
+  it("keeps the platform Retry note when they retry a job-failed ticket without one of their own", async () => {
+    await blockedByJobFailed();
+    await call("POST", "/tickets/1/retry", { mode: "continue" });
+    const { bundle } = await nextBundle();
+    expect(bundle.note).toContain("平台自动重试");
+    expect(bundle.note).toContain("export orders as csv");
+  });
+
+  it("gives neither the platform Retry note nor salvage.diff on a restart", async () => {
+    await blockedByJobFailed();
+    await call("POST", "/tickets/1/retry", { mode: "restart" });
+    const { bundle } = await nextBundle();
+    expect(bundle.ticket.restart).toBe(true);
+    expect(bundle.note).toBeNull();
+    expect(bundle.salvageDiff).toBeUndefined();
+  });
 });
 
 describe("editing a ticket", () => {
@@ -2658,6 +2718,31 @@ describe("what a person sees", () => {
     ]);
   });
 
+  it("records recovered-after-exit on the Run and shows it on the timeline", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        resultFix: "recovered-after-exit",
+        output: { status: "done", error: "Error: Premature close" },
+      },
+    });
+    expect((await call("GET", "/runs/1")).body.resultFix).toBe(
+      "recovered-after-exit",
+    );
+    const spec = (await call("GET", `/specs/${specId}`)).body;
+    expect(spec.timeline).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "recovered-after-exit",
+          text: "agent 进程异常退出，平台按它已写好的结果收下",
+          ticketId: 1,
+          runId: 1,
+        }),
+      ]),
+    );
+  });
+
   it("totals token usage by stage on the spec, and leaves a run without a result line empty", async () => {
     const specId = await runningSpec([ticket("a")]);
     await stage("implement", {
@@ -2710,6 +2795,22 @@ describe("what a person sees", () => {
         cacheReadTokens: 17,
       },
     ]);
+  });
+
+  it("sums unproductive agent Run duration on the spec, including finalize Runs", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, ticket_id, stage, result, duration_ms, token_usage)
+       VALUES
+         ($1, 1, 1, 'implement', 'job-failed', 60000, NULL),
+         ($1, 1, 1, 'review', 'cancelled', 25000, NULL),
+         ($1, 1, NULL, 'final-review', 'job-failed', 40000, NULL),
+         ($1, 1, 1, 'gate', 'job-failed', 99000, NULL),
+         ($1, 1, 1, 'implement', 'done', NULL, '{"inputTokens":9999}'::jsonb)`,
+      [specId],
+    );
+    const spec = await call("GET", `/specs/${specId}`);
+    expect(spec.body.wastedAgentMs).toBe(125_000);
   });
 });
 

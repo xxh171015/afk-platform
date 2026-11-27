@@ -402,4 +402,154 @@ describe("GET /metrics", () => {
     expect(filtered.leadTime.ended).toBe(1);
     expect(filtered.leadTime.specs[0].id).toBe(specId);
   });
+
+  let runSeq = 0;
+  async function insertAgentRun(
+    specId: number,
+    fields: {
+      stage: string;
+      result: string;
+      durationMs: number;
+      finishedAt?: Date;
+      ticketId?: number | null;
+      resultFix?: string | null;
+      jobError?: string | null;
+      failureSource?: "platform" | "external" | null;
+    },
+  ) {
+    const ticket = (
+      await db.pool.query<{ id: number; repo_id: number }>(
+        "SELECT id, repo_id FROM tickets WHERE spec_id = $1 LIMIT 1",
+        [specId],
+      )
+    ).rows[0];
+    const finishedAt = fields.finishedAt ?? new Date();
+    let jobId: number | null = null;
+    if (fields.jobError != null || fields.failureSource != null) {
+      jobId = (
+        await db.pool.query<{ id: number }>(
+          `INSERT INTO jobs (type, payload, state, idempotency_key, error)
+           VALUES ('agent-run', '{}'::jsonb, 'failed', $1, $2)
+           RETURNING id`,
+          [`wasted-${specId}-${++runSeq}`, fields.jobError ?? "boom"],
+        )
+      ).rows[0].id;
+      if (fields.failureSource) {
+        await db.pool.query(
+          `INSERT INTO events (spec_id, job_id, type, to_state, reason, failure_source)
+           VALUES ($1, $2, 'job', 'failed', 'job-failed', $3)`,
+          [specId, jobId, fields.failureSource],
+        );
+      }
+    }
+    await db.pool.query(
+      `INSERT INTO runs (
+         spec_id, repo_id, ticket_id, job_id, stage, result, duration_ms,
+         started_at, finished_at, result_fix
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        specId,
+        ticket.repo_id,
+        fields.ticketId === undefined ? ticket.id : fields.ticketId,
+        jobId,
+        fields.stage,
+        fields.result,
+        fields.durationMs,
+        new Date(finishedAt.getTime() - fields.durationMs),
+        finishedAt,
+        fields.resultFix ?? null,
+      ],
+    );
+  }
+
+  it("sums job-failed and cancelled agent Run duration by stage and failure class", async () => {
+    const { specId } = await runningSpec(["a"]);
+    await insertAgentRun(specId, {
+      stage: "implement",
+      result: "job-failed",
+      durationMs: 60_000,
+      failureSource: "platform",
+    });
+    await insertAgentRun(specId, {
+      stage: "review",
+      result: "cancelled",
+      durationMs: 30_000,
+    });
+    await insertAgentRun(specId, {
+      stage: "implement",
+      result: "job-failed",
+      durationMs: 15_000,
+      jobError: "npm error code EAI_AGAIN",
+      failureSource: "external",
+    });
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.wastedAgent.totalMs).toBe(105_000);
+    expect(week.wastedAgent.recoveredAfterExit).toBe(0);
+    expect(week.wastedAgent.byStage).toEqual([
+      { stage: "implement", source: "platform", durationMs: 60_000 },
+      { stage: "review", source: "cancelled", durationMs: 30_000 },
+      { stage: "implement", source: "external", durationMs: 15_000 },
+    ]);
+  });
+
+  it("counts recovered-after-exit Runs by week and does not add their duration as wasted", async () => {
+    const { specId } = await runningSpec(["a"]);
+    await insertAgentRun(specId, {
+      stage: "implement",
+      result: "done",
+      durationMs: 90_000,
+      resultFix: "recovered-after-exit",
+    });
+    await insertAgentRun(specId, {
+      stage: "implement",
+      result: "job-failed",
+      durationMs: 12_000,
+      failureSource: "platform",
+    });
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.wastedAgent.recoveredAfterExit).toBe(1);
+    expect(week.wastedAgent.totalMs).toBe(12_000);
+  });
+
+  it("includes finalize agent Runs and leaves gate Runs out of wasted agent time", async () => {
+    const { specId } = await runningSpec(["a"]);
+    await insertAgentRun(specId, {
+      stage: "final-review",
+      result: "job-failed",
+      durationMs: 45_000,
+      ticketId: null,
+      failureSource: "platform",
+    });
+    await insertAgentRun(specId, {
+      stage: "gate",
+      result: "job-failed",
+      durationMs: 99_000,
+      failureSource: "platform",
+    });
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.wastedAgent.totalMs).toBe(45_000);
+    expect(week.wastedAgent.byStage).toEqual([
+      { stage: "final-review", source: "platform", durationMs: 45_000 },
+    ]);
+  });
+
+  it("filters wasted agent time by project", async () => {
+    const shop = await runningSpec(["a"]);
+    const other = await runningSpec(["b"], "other");
+    await insertAgentRun(shop.specId, {
+      stage: "implement",
+      result: "cancelled",
+      durationMs: 20_000,
+    });
+    await insertAgentRun(other.specId, {
+      stage: "implement",
+      result: "cancelled",
+      durationMs: 80_000,
+    });
+    const filtered = thisWeek(
+      (await call("GET", `/metrics?projectId=${shop.projectId}`)).body,
+    );
+    expect(filtered.wastedAgent.totalMs).toBe(20_000);
+  });
 });

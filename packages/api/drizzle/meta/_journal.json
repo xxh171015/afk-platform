@@ -708,6 +708,20 @@
       "when": 1795800000000,
       "tag": "0100_change_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1795900000000,
+      "tag": "0101_external_network_backoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1796000000000,
+      "tag": "0102_baseline_gate",
+      "breakpoints": true
     }
   ]
 }

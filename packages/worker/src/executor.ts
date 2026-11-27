@@ -6,11 +6,12 @@ import {
 } from "./align-ticket-branch.ts";
 import { withCredentials } from "./credentials.ts";
 import { cutIntegrationBranch } from "./domain.ts";
-import type { Slot } from "./slots.ts";
+import { type Slot, salvageFailedSlot } from "./slots.ts";
 import {
   bringBranches,
   type ExecutorDeps,
   InfrastructureError,
+  JobLostError,
   NoFreeSlotError,
   type StageContext,
   type StageOutcomeBody,
@@ -85,9 +86,57 @@ export async function executeStage(
   try {
     body = await runStage(deps, context, mainDir, slot);
     return body;
+  } catch (error) {
+    if (!(error instanceof JobLostError) && shouldSalvageOnFail(context)) {
+      salvageBeforeRelease(deps, context, mainDir, slot, error);
+    }
+    throw error;
   } finally {
     // Any stage that ran to an answer leaves a clean slot, whatever the answer; a clone is kept only when the stage broke.
     await slot.release(body ? "success" : "failure");
+  }
+}
+
+const SALVAGE_ON_FAIL_STAGES = new Set([
+  "implement",
+  "gate-fix",
+  "review-fix",
+  "merge-fix",
+  "review",
+  "recheck",
+  "diagnose",
+  "final-review",
+  "final-fix",
+  "rework",
+  "final-tidy",
+  "update-branch",
+]);
+
+function shouldSalvageOnFail(context: StageContext): boolean {
+  return SALVAGE_ON_FAIL_STAGES.has(context.bundle.job.stage);
+}
+
+function salvageBeforeRelease(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+  error: unknown,
+): void {
+  if (!deps.salvageDir) return;
+  try {
+    const salvage = salvageFailedSlot({
+      slotClone: slot.dir,
+      mainClone: mainDir,
+      task: slot.task,
+      salvageDir: deps.salvageDir,
+      log: context.log,
+    });
+    if (error instanceof InfrastructureError) error.salvage = salvage;
+  } catch (salvageError) {
+    context.log(
+      `could not salvage: ${salvageError instanceof Error ? salvageError.message : String(salvageError)}`,
+    );
   }
 }
 
@@ -137,9 +186,20 @@ async function runStage(
       `restart: dropped ${bundle.agentBranch}${align.remoteTip ? ` (origin was ${align.remoteTip})` : ""}`,
     );
   context.align = align;
-  if (align.orphan)
+  const salvageOrphan = align.salvage?.converted?.some(
+    (item) => item.orphanRef === align.orphan?.orphanRef,
+  );
+  if (align.orphan && !salvageOrphan)
     context.log(
       `align: ${bundle.agentBranch} follows origin ${align.remoteTip}; kept ${align.orphan.orphanSha} at ${align.orphan.orphanRef}`,
+    );
+  if (align.salvage?.adopted)
+    context.log(
+      `align: fast-forwarded ${bundle.agentBranch} from ${align.salvage.adopted.salvageRef} (${align.salvage.adopted.sha})`,
+    );
+  for (const converted of align.salvage?.converted ?? [])
+    context.log(
+      `align: ${converted.salvageRef} was not a descendant of ${bundle.agentBranch}; kept ${converted.orphanSha} at ${converted.orphanRef}`,
     );
   bringBranches(slot, mainDir, [integration, bundle.agentBranch]);
   try {

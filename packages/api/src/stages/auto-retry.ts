@@ -18,6 +18,44 @@ const NOTES: Record<AutoRetryOutcome, string> = {
     "平台自动重试：上一次 Run 结束时没有输出能读的 <result>。分支上已有的提交都保留着，接着把事情做完，最后一条消息的末尾按这个阶段规定的格式输出 <result>…</result>。",
 };
 
+export type JobFailureSalvage = {
+  commits: { sha: string; subject: string }[];
+  hadDiff: boolean;
+  diffTooLarge?: boolean;
+};
+
+// No live worker to retrieve from: the next Run is told to look at the branch and salvage.diff itself.
+export const LEASE_EXPIRED_RETRY_NOTE =
+  "上次运行中断了，分支上可能已有提交，先看 `git log base..HEAD` 和 `/context/salvage.diff`（有的话）。";
+
+export function jobFailureRetryNote(
+  durationMs: number,
+  error: string,
+  salvage?: JobFailureSalvage,
+): string {
+  const minute = Math.max(1, Math.ceil(durationMs / 60_000) || 1);
+  const why = error.replaceAll(/\s+/g, " ").trim().slice(0, 200);
+  const commits = salvage?.commits ?? [];
+  const commitsPart =
+    commits.length === 0
+      ? "分支上还没有新提交。"
+      : `分支上已有这些提交：\n${commits
+          .map((commit) => `- ${commit.sha.slice(0, 7)} ${commit.subject}`)
+          .join("\n")}`;
+  let diffPart = "";
+  if (salvage?.hadDiff && salvage.diffTooLarge) {
+    diffPart = "未提交改动太大，没有提供。";
+  } else if (salvage?.hadDiff) {
+    diffPart = "未提交改动在 /context/salvage.diff。";
+  }
+  return [
+    `平台自动重试：上一次 Run 在第 ${minute} 分钟因「${why}」中止。`,
+    commitsPart,
+    ...(diffPart ? [diffPart] : []),
+    "先核对验收测试，已完成就直接出结果。",
+  ].join("\n");
+}
+
 export type AutoRetryTarget =
   | { type: "ticket"; specId: number; repoId: number; ticketId: number }
   | {

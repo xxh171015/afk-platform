@@ -4,6 +4,7 @@ export {
   deleteOrphanRefs,
   originSha,
   orphanRefFor,
+  salvageRefFor,
 } from "./align-ticket-branch.ts";
 export type { ClaimedJob, Holding, WorkerApi } from "./api.ts";
 export { createWorkerApi } from "./api.ts";
@@ -23,13 +24,24 @@ export type { PushFn, PushRequest, PushResult } from "./push.ts";
 export { pushRef, pushWithToken } from "./push.ts";
 export { RepoStore } from "./repos.ts";
 export type {
+  FailSalvage,
   RetrieveResult,
+  SalvageCommit,
   Slot,
   SlotLock,
   SlotManagerOptions,
   SlotTask,
 } from "./slots.ts";
-export { processAlive, retrieveResult, SlotManager } from "./slots.ts";
+export {
+  latestSalvageDiffFile,
+  processAlive,
+  readLatestSalvageDiff,
+  retrieveResult,
+  SALVAGE_DIFF_MAX_BYTES,
+  SlotManager,
+  salvageDiffFile,
+  salvageFailedSlot,
+} from "./slots.ts";
 export { pruneSnapshots, SnapshotStore } from "./snapshots.ts";
 export type { JobOutcome, WorkerOptions } from "./worker.ts";
 export { processJob, runWorker } from "./worker.ts";

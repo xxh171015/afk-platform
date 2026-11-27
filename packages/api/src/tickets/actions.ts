@@ -32,6 +32,10 @@ import {
   enqueueStageJob,
 } from "../jobs/stage-jobs.ts";
 import {
+  enqueueBaselineGates,
+  recutBaselineCuts,
+} from "../planning/baseline-gate.ts";
+import {
   inTransaction,
   lockSpec,
   schedulePass,
@@ -54,6 +58,7 @@ interface TicketRow {
   allowed_recheck_shas: string[];
   type: string;
   resume_stage: "e2e" | "gate" | null;
+  retry_note: string | null;
 }
 
 function testNamesFrom(raw: unknown): { classname: string; name: string }[] {
@@ -81,7 +86,7 @@ async function loadLocked(
   await lockSpec(client, found.rows[0].spec_id);
   const row = await client.query<TicketRow>(
     `SELECT id, spec_id, repo_id, state, blocked_reason, content_version, allowed_protected_paths,
-            allowed_removed_tests, allowed_recheck_shas, type, resume_stage
+            allowed_removed_tests, allowed_recheck_shas, type, resume_stage, retry_note
      FROM tickets WHERE id = $1`,
     [ticketId],
   );
@@ -104,6 +109,17 @@ export function parkedRetryNote(
   if (typeof note !== "string") return null;
   const trimmed = note.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+// Platform text first, a person's Retry note after. Either side may be missing.
+export function combinedRetryNote(
+  platform: string | null | undefined,
+  human: string | null | undefined,
+): string | null {
+  const left = parkedRetryNote(platform);
+  const right = parkedRetryNote(human);
+  if (left && right) return `${left}\n\n${right}`;
+  return left ?? right;
 }
 
 const AGENT_PUSH_STAGES = [
@@ -163,12 +179,24 @@ export async function retryTicket(
     }
     const plan = retryPlan(mode === "continue" ? "resume" : "restart");
     const parked = parkedRetryNote(note);
+    // After job-failed, keep the platform's note and put a person's Retry note after it. Restart drops the
+    // platform note (align drops the branch; salvage.diff is omitted too).
+    const keepPlatform =
+      mode === "continue" &&
+      (ticket.blocked_reason === "job-failed" ||
+        ticket.blocked_reason === "integration-environment-failed");
     // Continuing without a note for the agent, on a branch an agent already finished: nothing needs writing, so the
     // pipeline goes on from the gate (which reuses a stored pass) instead of an implement run finding nothing to do.
+    // A leftover platform salvage note does not count: that Run was review/recheck, not implement.
     const fromGate =
       mode === "continue" &&
       parked === null &&
       (await finishedBranch(client, ticketId));
+    const stored = fromGate
+      ? null
+      : keepPlatform
+        ? combinedRetryNote(ticket.retry_note, parked)
+        : parked;
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, auto_retried = false,
          ${CLEAR_PARALLEL_REVIEW_SQL},
@@ -181,7 +209,7 @@ export async function retryTicket(
         ticketId,
         JSON.stringify(plan.fixCounts),
         plan.deleteBranch,
-        parked,
+        stored,
         fromGate,
       ],
     );
@@ -1098,12 +1126,27 @@ async function lockedSpecState(
 async function unpauseSpec(
   pool: pg.Pool,
   specId: number,
-  action: Extract<HumanAction, "retry" | "allow">,
+  action: Extract<HumanAction, "retry" | "allow" | "continue-baseline">,
   extraSeconds: number,
 ): Promise<ActionResult<{ state: SpecState }>> {
   return inTransaction(pool, async (client) => {
     const state = await lockedSpecState(client, specId);
     if (!state) return { status: "no-ticket" };
+    if (action === "continue-baseline") {
+      const paused = await client.query<{ pause_reason: string | null }>(
+        "SELECT pause_reason FROM specs WHERE id = $1",
+        [specId],
+      );
+      if (paused.rows[0]?.pause_reason !== "baseline-gate-failed") {
+        return refused(
+          `only a spec paused by baseline-gate-failed can continue anyway; this one is ${state}${paused.rows[0]?.pause_reason ? ` (${paused.rows[0].pause_reason})` : ""}`,
+        );
+      }
+      await client.query(
+        "UPDATE specs SET baseline_gate_state = 'waived' WHERE id = $1",
+        [specId],
+      );
+    }
     const allowed = specTransition(state, "resume");
     if (!allowed.ok) return refused(allowed.reason);
     const resumeFacts = await finalizationResumeFacts(client, specId);
@@ -1190,6 +1233,39 @@ export async function resumeSpec(
   extraSeconds = 0,
 ): Promise<ActionResult<{ state: SpecState }>> {
   return unpauseSpec(pool, specId, "retry", extraSeconds);
+}
+
+export async function continueBaseline(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return unpauseSpec(pool, specId, "continue-baseline", 0);
+}
+
+export async function recheckBaseline(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return inTransaction(pool, async (client) => {
+    const state = await lockedSpecState(client, specId);
+    if (!state) return { status: "no-ticket" };
+    const paused = await client.query<{ pause_reason: string | null }>(
+      "SELECT pause_reason FROM specs WHERE id = $1",
+      [specId],
+    );
+    if (
+      state !== "paused" ||
+      paused.rows[0]?.pause_reason !== "baseline-gate-failed"
+    ) {
+      return refused(
+        `only a spec paused by baseline-gate-failed can recut from current main; this one is ${state}${paused.rows[0]?.pause_reason ? ` (${paused.rows[0].pause_reason})` : ""}`,
+      );
+    }
+    await recutBaselineCuts(client, specId);
+    await enqueueBaselineGates(client, specId, { recut: true });
+    await recordAction(client, "recheck-baseline", { specId });
+    return { status: "ok", state: "paused" };
+  });
 }
 
 export async function allowSpec(

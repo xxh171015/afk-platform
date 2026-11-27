@@ -20,6 +20,7 @@
 - `/context/domain/` 有就读：规划仓库在规划提交上的 `GLOSSARY.md` 和 `docs/adr/`，只读，以它为准。没有这个目录就当没有规划文档。这里不会有 `AGENTS.md`，也不要把规划仓库整仓挂到 `/refs`。
 - `/refs/<名字>/` 是需求或票指定的只读参考仓库快照。spec、票说「与某系统一致」「跟随某仓库」时，照着 `/refs` 里的做法写，不要另起一套；找不到时才记 `known-gap`，并写明在 `/refs` 里查过什么。
 - `/context/note.md` 有就读：当成人对这一次 Run 的指示，不当成改票。没有这个文件就当没有说明。
+- `/context/salvage.diff` 有就读：上一次作业失败时没提交的改动，只读。平台不会 apply 也不会提交；太大时没有这个文件，说明写在 note.md。需要时自己用，不要假定工作区已经带上这些改动。
 - **不要**读 `docs/agents/issue-tracker.md` 或任何 tracker 文档，**不要**调用 `plat`，**不要**运行 `/setup-matt-pocock-skills`，也不要提示别人运行它。skill 说"tracker 应该已经提供给你"，指的就是 `/context`。
 - 你没有 Skill 工具也不需要它：skill 是 `/home/agent/.cursor/skills/<名字>/SKILL.md` 这个文件，需要时按路径读它，照着做。
 
@@ -42,7 +43,9 @@
 - 等后台命令时设上限，按这条命令的正常耗时估。超过上限还没有结果，先查进程，不要再等同一个条件，也不要反复等同一个早就没有新输出的命令。
 - 自己之前启动、还在跑的测试或服务，先结束掉，再决定重跑还是放弃。
 - `/context`、`/refs`、契约目录都是只读的。
+- 输出最终消息之前，先停掉自己启动的后台任务。
+- 输出 `<result>` 之后，不再回应任何后台任务通知。
 
 ## 结果
 
-先把结果 JSON 写进 `/tmp/afk-result.json`，跑 `node /home/agent/afk/check-result.mjs <阶段> /tmp/afk-result.json`（阶段名就是 `/context/run.json` 的阶段），改到通过，再把同样的内容放进最后一条消息末尾的 `<result>…</result>`。标签原样保留，里面是一个 JSON 对象，不要加别的字段。
+先把结果 JSON 写进 `/afk-out/result.json`，跑 `node /home/agent/afk/check-result.mjs <阶段> /afk-out/result.json`（阶段名就是 `/context/run.json` 的阶段），改到通过，再把同样的内容放进最后一条消息末尾的 `<result>…</result>`。标签原样保留，里面是一个 JSON 对象，不要加别的字段。

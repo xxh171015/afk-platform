@@ -31,6 +31,7 @@ import {
   type ReviewOutput,
   ReviewOutputSchema,
   ReworkOutputSchema,
+  resultSectionOf,
   reviewFindings,
   reviewOutputSchemaFor,
   reviewSources,
@@ -38,6 +39,7 @@ import {
   StandardsReviewOutputSchema,
   TidyOutputSchema,
   writePrompt,
+  writeRepairPrompt,
 } from "./agent.ts";
 import { renderContext } from "./context.ts";
 import { git, gitOut } from "./exec.ts";
@@ -1124,6 +1126,7 @@ describe("the prompts", () => {
     );
     expect(design).toContain("/home/agent/afk/check-result.mjs");
     expect(design).toContain("node /home/agent/afk/check-result.mjs");
+    expect(design).toContain("/afk-out/result.json");
   });
 
   it("documents that ticket stages also get /context/tickets.md", () => {
@@ -1149,11 +1152,24 @@ describe("the prompts", () => {
   it("tells the overlay to write the result file, self-check, fix until it passes, then output it", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     const section = overlay.slice(overlay.indexOf("## 结果"));
-    expect(section).toContain("/tmp/afk-result.json");
+    expect(section).toContain("/afk-out/result.json");
     expect(section).toContain("node /home/agent/afk/check-result.mjs");
     expect(section).toContain("/context/run.json");
     expect(section).toContain("改到通过");
     expect(section).toContain("<result>");
+  });
+
+  it("puts that same result section, including /afk-out/result.json, into the repair prompt", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const dir = mkdtempSync(join(tmpdir(), "afk-repair-prompt-"));
+    dirs.push(dir);
+    const { prompt } = writeRepairPrompt(dir, {
+      resultSection: resultSectionOf(overlay),
+      rawText: "{}",
+      issues: [{ path: "(root)", message: "bad" }],
+    });
+    expect(prompt).toContain("/afk-out/result.json");
+    expect(prompt).toContain("node /home/agent/afk/check-result.mjs");
   });
 
   it("tells the overlay that ref is only for deferred, and examples of other kinds omit it", () => {
@@ -1211,6 +1227,15 @@ describe("the prompts", () => {
     expect(bounds).toContain("自己之前启动");
     expect(bounds).toContain("先结束掉");
     expect(bounds).toContain("重跑还是放弃");
+  });
+
+  it("tells the agent to stop its background tasks before the final message and ignore them after <result>", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const bounds = overlay.slice(overlay.indexOf("## 做事的边界"));
+    expect(bounds).toContain("输出最终消息之前");
+    expect(bounds).toContain("停掉自己启动的后台任务");
+    expect(bounds).toContain("<result>");
+    expect(bounds).toContain("不再回应任何后台任务通知");
   });
 
   it("records Run 654's idle wait in the optimization plan and how later runs should be compared", () => {

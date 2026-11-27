@@ -870,6 +870,77 @@ describe("paused specs and stopped overall reviews", () => {
     expect(fake.calls).toContain("POST /specs/1/approve-removed-tests");
   });
 
+  it("offers 不管它继续 for a spec paused by baseline-gate-failed and hides retry", async () => {
+    let current = queue({
+      specs: [
+        {
+          ...paused,
+          reason: "baseline-gate-failed",
+          baselineFailures: [
+            {
+              repo: "backend",
+              reasons: ["test failed (exit 1)"],
+              failingTests: ["orders exports"],
+              run: { id: 7, displayId: "R-7" },
+            },
+          ],
+        },
+      ],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/continue-baseline": () => {
+        current = queue();
+        return { json: { state: "running" } };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    expect(spec.getByText("基线门禁失败")).toBeTruthy();
+    expect(spec.getByText(/backend/)).toBeTruthy();
+    expect(spec.getByRole("link", { name: "R-7" }).getAttribute("href")).toBe(
+      "/runs/7",
+    );
+    expect(spec.queryByRole("button", { name: "重试" })).toBeNull();
+    expect(spec.queryByRole("button", { name: "放行" })).toBeNull();
+    fireEvent.click(spec.getByRole("button", { name: "不管它继续" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(fake.calls).toContain("POST /specs/1/continue-baseline");
+  });
+
+  it("offers 重新检查 beside 不管它继续 for a spec paused by baseline-gate-failed", async () => {
+    let current = queue({
+      specs: [
+        {
+          ...paused,
+          reason: "baseline-gate-failed",
+          baselineFailures: [
+            {
+              repo: "backend",
+              reasons: ["test failed (exit 1)"],
+              failingTests: ["orders exports"],
+              run: { id: 7, displayId: "R-7" },
+            },
+          ],
+        },
+      ],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/recheck-baseline": () => {
+        current = queue();
+        return { json: { state: "paused" } };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    expect(spec.getByRole("button", { name: "不管它继续" })).toBeTruthy();
+    expect(spec.queryByRole("button", { name: "重试" })).toBeNull();
+    fireEvent.click(spec.getByRole("button", { name: "重新检查" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(fake.calls).toContain("POST /specs/1/recheck-baseline");
+  });
+
   it("lets a person allow a paused spec through, or cancel it", async () => {
     let current = queue({ specs: [paused] });
     const fake = fakeServer({

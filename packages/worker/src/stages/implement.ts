@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   git,
   gitOrThrow,
   ImplementOutputSchema,
+  lastAssistantFromCursorLine,
   promptFor,
   RECHECK_REF_PREFIX,
   readGateConfig,
@@ -43,6 +44,11 @@ import {
   tipAfterFailedPush,
   withEnvironment,
 } from "./common.ts";
+import {
+  RECOVER_AFTER_EXIT_STAGES,
+  RECOVERED_AFTER_EXIT_NOTE,
+  recoverAfterAbnormalExit,
+} from "./recover-after-exit.ts";
 
 const RECHECK_TRIGGER_STAGES = new Set([
   "review-fix",
@@ -154,34 +160,73 @@ export async function agentChange(
     const generatedEnv = generatedUpstream
       ? { [GENERATED_UPSTREAM_ENV]: generatedUpstream }
       : undefined;
+    const schema =
+      stage === "final-tidy"
+        ? TidyOutputSchema
+        : stage === "rework"
+          ? reworkOutputSchema(reworkCommentIds(bundle))
+          : ImplementOutputSchema;
+    const logDir = join(
+      deps.sandboxLogsRoot ?? join(deps.tmpRoot ?? tmpdir(), "sandbox-logs"),
+      runIdOf(bundle),
+    );
+    const resultDir = join(logDir, "afk-out");
+    rmSync(resultDir, { recursive: true, force: true });
+    mkdirSync(resultDir, { recursive: true });
+    let lastAssistant: string | undefined;
     // An integration ticket's agent works in its integration environment: it writes the e2e against real services,
     // and a fix reproduces the failure there. The environment is gone again when the run is over.
     const runAgent = (placement?: SandboxPlacement) =>
-      deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
+      deps.makeAgentRunner(slot.dir, runIdOf(bundle), logDir).run({
         stage,
         branch: agent,
         baseBranch: integration,
         promptFile: given.promptFile,
         ctxDir,
         refs,
-        schema:
-          stage === "final-tidy"
-            ? TidyOutputSchema
-            : stage === "rework"
-              ? reworkOutputSchema(reworkCommentIds(bundle))
-              : ImplementOutputSchema,
+        schema,
+        resultDir,
         ...(placement ? { placement } : {}),
         ...(generatedEnv ? { env: generatedEnv } : {}),
         ...options,
+        onRawLine: (line) => {
+          options.onRawLine?.(line);
+          const text = lastAssistantFromCursorLine(line);
+          if (text) lastAssistant = text;
+        },
         signal: context.signal,
       });
-    const run = inEnvironment
+    let run = inEnvironment
       ? await withEnvironment(deps, context, stage, (environment) =>
           runAgent({ network: environment.network, env: environment.env }),
         )
       : await runAgent();
     if (context.signal.aborted)
       throw new JobLostError("the lease was lost during the agent run");
+    let recoveredError: string | undefined;
+    if (RECOVER_AFTER_EXIT_STAGES.has(stage)) {
+      const recovered = recoverAfterAbnormalExit({
+        result: run,
+        schema,
+        resultDir,
+        lastAssistant,
+        slotDir: slot.dir,
+        branch: agent,
+        baseSha,
+        inherited: before !== baseSha,
+        requireCommit: true,
+      });
+      if (recovered.kind === "recovered") {
+        run = recovered.result;
+        recoveredError = recovered.originalError;
+        log(RECOVERED_AFTER_EXIT_NOTE);
+      } else if (recovered.kind === "job-failure") {
+        throw new InfrastructureError(
+          run.error ?? "agent exited",
+          billedFacts(run),
+        );
+      }
+    }
     // Commits the branch already carries (salvaged from an interrupted run, or kept by a continue-retry) are the
     // ticket's work: an agent that finds it complete adds none, and that is done, not no-commits.
     const inherited =
@@ -197,6 +242,15 @@ export async function agentChange(
     );
 
     const billed = billedFacts(run);
+    const output =
+      run.output === undefined
+        ? { error: run.error }
+        : recoveredError
+          ? {
+              ...(run.output as Record<string, unknown>),
+              error: recoveredError,
+            }
+          : run.output;
     const facts: Record<string, unknown> = {
       branch: agent,
       baseSha,
@@ -204,7 +258,7 @@ export async function agentChange(
       durationMs: run.durationMs,
       ...agentFacts(deps, options, given.prompt, run),
       ...(refs.length ? { refShas } : {}),
-      output: run.output ?? { error: run.error },
+      output,
     };
     if (verdict.outcome !== "done")
       return { stage, outcome: verdict.outcome, run: facts };
@@ -224,6 +278,13 @@ export async function agentChange(
         `could not take ${agent} back: ${taken.error ?? "no such branch in the slot"}`,
         billed,
       );
+    if (taken.orphan) {
+      log(
+        `retrieve: ${agent} was not an ancestor of the slot; kept ${taken.orphan.orphanSha} at ${taken.orphan.orphanRef}`,
+      );
+      facts.orphanRef = taken.orphan.orphanRef;
+      facts.orphanSha = taken.orphan.orphanSha;
+    }
     const stamped = stampTrailers({
       repoDir: mainDir,
       branch: agent,

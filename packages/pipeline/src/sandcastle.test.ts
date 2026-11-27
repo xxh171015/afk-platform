@@ -86,6 +86,39 @@ describe("the mounts", () => {
     }
   });
 
+  it("mounts a per-run empty host dir writable at /afk-out and leaves every other mount read-only", () => {
+    const mounts = sandboxMounts({
+      ctxDir: "/c",
+      skillsMount: "/s",
+      refs: [{ name: "backend", dir: "/r" }],
+      outDir: "/host/logs/R-9/afk-out",
+    });
+    expect(mounts).toEqual(
+      expect.arrayContaining([
+        {
+          hostPath: "/host/logs/R-9/afk-out",
+          sandboxPath: "/afk-out",
+          readonly: false,
+        },
+      ]),
+    );
+    expect(mounts.filter((mount) => mount.readonly === false)).toEqual([
+      {
+        hostPath: "/host/logs/R-9/afk-out",
+        sandboxPath: "/afk-out",
+        readonly: false,
+      },
+    ]);
+  });
+
+  it("does not mount /afk-out when the run has no output dir", () => {
+    expect(
+      sandboxMounts({ ctxDir: "/c", skillsMount: "/s" }).map(
+        (mount) => mount.sandboxPath,
+      ),
+    ).not.toContain("/afk-out");
+  });
+
   it("mounts the result checker read-only at /home/agent/afk/check-result.mjs", () => {
     expect(
       sandboxMounts({
@@ -296,7 +329,9 @@ describe("the hardened sandbox", () => {
       commitSha: sha,
       configSha: sha,
     });
-    expectHardened(dockerRunOf(fake.calls), "gate");
+    const run = dockerRunOf(fake.calls);
+    expectHardened(run, "gate");
+    expect(run.join(" ")).not.toContain("/afk-out");
   });
 
   it("the e2e path opens a Sandcastle sandbox with those same docker run parameters", async () => {

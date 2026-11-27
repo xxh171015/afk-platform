@@ -13,11 +13,11 @@ export async function setupBase(
   dir: string,
   repo: { name: string; url: string; defaultBranch: string },
   log: (line: string) => void,
+  mainSha?: string,
 ): Promise<string> {
-  const main = gitOrThrow(dir, [
-    "rev-parse",
-    `refs/heads/${repo.defaultBranch}`,
-  ]);
+  const main =
+    mainSha ??
+    gitOrThrow(dir, ["rev-parse", `refs/heads/${repo.defaultBranch}`]);
   if (!(await repos.fetchBranch(dir, repo.url, SETUP_BRANCH))) return main;
   const setup = gitOrThrow(dir, ["rev-parse", `refs/heads/${SETUP_BRANCH}`]);
 

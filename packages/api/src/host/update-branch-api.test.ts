@@ -1089,6 +1089,161 @@ describe("the update-branch job", () => {
     });
   });
 
+  it("does not requeue a merge-type update-branch that is not a push rejection", async () => {
+    const job = await queuedUpdate();
+    expect(job.lockKey).toBe("integration:1:spec/export");
+    expect(
+      (await agent.fail(job.id, job.attempt, "docker daemon not running"))
+        .status,
+    ).toBe(200);
+    expect(await specRow()).toEqual({ state: "running", pause_reason: null });
+    expect((await agent.claim()).body.job).toBeNull();
+  });
+
+  it("requeues an update-branch merge agent on a platform failure and pauses the spec at the third", async () => {
+    const merge = await queuedUpdate();
+    await agent.complete(merge.id, merge.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    for (let i = 0; i < 2; i++) {
+      const fix = (await agent.claim()).body.job as {
+        id: number;
+        attempt: number;
+        type: string;
+        payload: Json;
+      };
+      expect(fix).toMatchObject({
+        type: "agent-run",
+        payload: { stage: "update-branch", fix: true },
+      });
+      expect(
+        (await agent.fail(fix.id, fix.attempt, "docker daemon not running"))
+          .status,
+      ).toBe(200);
+      expect(await specRow()).toEqual({ state: "running", pause_reason: null });
+    }
+    const third = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    expect(
+      (await agent.fail(third.id, third.attempt, "docker daemon not running"))
+        .status,
+    ).toBe(200);
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "job-failed",
+    });
+    expect((await agent.claim()).body.job).toBeNull();
+  });
+
+  it("waits then requeues an update-branch merge agent on an outside-service failure and pauses at the fifth", async () => {
+    const merge = await queuedUpdate();
+    await agent.complete(merge.id, merge.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const waits = [30, 120, 300, 600];
+    for (const wait of waits) {
+      const fix = (await agent.claim()).body.job as {
+        id: number;
+        attempt: number;
+        type: string;
+      };
+      expect(fix.type).toBe("agent-run");
+      const at = clock.now();
+      expect(
+        (
+          await agent.fail(
+            fix.id,
+            fix.attempt,
+            "Failed to reach the Cursor API",
+          )
+        ).status,
+      ).toBe(200);
+      expect(await specRow()).toEqual({ state: "running", pause_reason: null });
+      const notBefore = (
+        await db.pool.query<{ not_before: Date | null }>(
+          `SELECT not_before FROM jobs
+           WHERE state = 'queued' AND payload->>'stage' = 'update-branch'
+           ORDER BY id DESC LIMIT 1`,
+        )
+      ).rows[0]?.not_before;
+      expect(notBefore?.getTime()).toBe(at.getTime() + wait * 1000);
+      expect((await agent.claim()).body.job).toBeNull();
+      clock.advanceSeconds(wait);
+    }
+    const fifth = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    expect(
+      (
+        await agent.fail(
+          fifth.id,
+          fifth.attempt,
+          "Failed to reach the Cursor API",
+        )
+      ).status,
+    ).toBe(200);
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "job-failed",
+    });
+    expect((await agent.claim()).body.job).toBeNull();
+  });
+
+  it("leaves a Retry note on the next update-branch merge-agent Run after a job-failed requeue", async () => {
+    const merge = await queuedUpdate();
+    await agent.complete(merge.id, merge.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+      type: string;
+    };
+    expect(fix.type).toBe("agent-run");
+    expect(
+      (
+        await agent.fail(fix.id, fix.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [
+              {
+                sha: "abc1111111111111111111111111111111111111",
+                subject: "resolve the conflict",
+              },
+            ],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+      type: string;
+      payload: Json;
+    };
+    expect(again).toMatchObject({
+      type: "agent-run",
+      payload: { stage: "update-branch", fix: true },
+    });
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
+    expect(note).toContain("resolve the conflict");
+    expect(note).toContain("/context/salvage.diff");
+  });
+
   it("records an orphan from a failed update-branch job on the Run and as an event", async () => {
     const job = await queuedUpdate();
     expect(

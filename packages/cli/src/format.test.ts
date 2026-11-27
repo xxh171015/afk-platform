@@ -441,6 +441,51 @@ describe("plat blocked of a stuck ticket", () => {
     expect(text).toContain("plat ticket approve-removed-tests T-12");
   });
 
+  it("prints continue-baseline for a spec paused by baseline-gate-failed", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      specs: [
+        {
+          displayId: "S-1",
+          title: "Order export",
+          reason: "baseline-gate-failed",
+          baselineFailures: [
+            {
+              repo: "backend",
+              reasons: ["test failed (exit 1)"],
+              failingTests: ["orders exports"],
+              run: { id: 7, displayId: "R-7" },
+            },
+          ],
+        },
+      ],
+    } as never);
+    expect(text).toContain("基线门禁失败");
+    expect(text).toContain("backend: test failed (exit 1)");
+    expect(text).toContain("failing tests: orders exports");
+    expect(text).toContain("plat run logs R-7");
+    expect(text).toContain("plat spec recheck-baseline S-1");
+    expect(text).toContain("plat spec continue-baseline S-1");
+  });
+
+  it("prints recheck-baseline before continue-baseline for baseline-gate-failed", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      specs: [
+        {
+          displayId: "S-1",
+          title: "Order export",
+          reason: "baseline-gate-failed",
+          baselineFailures: [],
+        },
+      ],
+    } as never);
+    const recut = text.indexOf("plat spec recheck-baseline S-1");
+    const anyway = text.indexOf("plat spec continue-baseline S-1");
+    expect(recut).toBeGreaterThan(-1);
+    expect(anyway).toBeGreaterThan(recut);
+  });
+
   it("prints the append import command for contract-change-needed", () => {
     const text = blockedText({
       ...emptyQueue,

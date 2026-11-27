@@ -1,7 +1,7 @@
 import { FAILURE_SOURCES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
-import { metricsView } from "../metrics/metrics.ts";
+import { metricsView, WASTED_AGENT_SOURCES } from "../metrics/metrics.ts";
 import { INT4_MAX } from "./schemas.ts";
 
 const json = <T extends z.ZodType>(schema: T) => ({
@@ -72,6 +72,17 @@ const metricsRoute = createRoute({
                 automatic: z.boolean(),
               }),
             ),
+            wastedAgent: z.object({
+              totalMs: z.number().int(),
+              recoveredAfterExit: z.number().int(),
+              byStage: z.array(
+                z.object({
+                  stage: z.string(),
+                  source: z.enum(WASTED_AGENT_SOURCES),
+                  durationMs: z.number().int(),
+                }),
+              ),
+            }),
           }),
         ),
       }),

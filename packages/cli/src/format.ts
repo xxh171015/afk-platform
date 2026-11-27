@@ -285,11 +285,20 @@ interface PlanningLike {
   blocking?: BlockingLike;
 }
 
+interface BaselineFailureLike {
+  repo: string;
+  reasons: string[];
+  failingTests: string[];
+  log?: string;
+  run?: { id: number; displayId: string } | null;
+}
+
 interface PausedSpecLike {
   id?: number;
   displayId: string;
   title: string;
   reason: string;
+  baselineFailures?: BaselineFailureLike[];
   waitingSince?: string;
   blocking?: BlockingLike;
 }
@@ -433,9 +442,25 @@ function planningLines(p: PlanningLike): string[] {
 }
 
 function pausedSpecLines(s: PausedSpecLike): string[] {
+  const failures = s.baselineFailures ?? [];
   return [
     `${s.displayId}  paused  ${s.title}: ${pauseReasonLabel(s.reason)}`,
     ...waitingLines(s.blocking, s.waitingSince),
+    ...failures.flatMap((failure) => [
+      `    ${failure.repo}: ${failure.reasons.join("; ") || "failed"}`,
+      ...(failure.failingTests.length > 0
+        ? [`    failing tests: ${failure.failingTests.join(", ")}`]
+        : []),
+      ...(failure.run
+        ? [`    log: plat run logs ${failure.run.displayId}`]
+        : []),
+    ]),
+    ...(s.reason === "baseline-gate-failed"
+      ? [
+          `    then: plat spec recheck-baseline ${s.displayId}`,
+          `    or: plat spec continue-baseline ${s.displayId}`,
+        ]
+      : []),
   ];
 }
 

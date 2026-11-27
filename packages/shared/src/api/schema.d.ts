@@ -2640,6 +2640,80 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/worker/jobs/{id}/baseline-task": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          workerId: string;
+          attempt: number;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What a baseline-gate job has to do: run the repo's gate on the integration-branch cut SHA */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              repo: {
+                name: string;
+                url: string;
+                defaultBranch: string;
+              };
+              sha?: string;
+              specId: number;
+              recut?: {
+                branch: string;
+                planningSha?: string;
+              };
+            };
+          };
+        };
+        /** @description No such job, or not a baseline-gate job */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Not the lease holder at the current attempt (fencing) */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/worker/jobs/{id}/trial-merge-task": {
     parameters: {
       query?: never;
@@ -2958,6 +3032,14 @@ export interface paths {
               cursorCliVersion?: string;
               /** @enum {string} */
               axis?: "standards" | "spec";
+              salvage?: {
+                commits: {
+                  sha: string;
+                  subject: string;
+                }[];
+                hadDiff: boolean;
+                diffTooLarge?: boolean;
+              };
             };
             extraRuns?: {
               tokenUsage?: unknown;
@@ -2965,6 +3047,14 @@ export interface paths {
               cursorCliVersion?: string;
               /** @enum {string} */
               axis?: "standards" | "spec";
+              salvage?: {
+                commits: {
+                  sha: string;
+                  subject: string;
+                }[];
+                hadDiff: boolean;
+                diffTooLarge?: boolean;
+              };
             }[];
             orphanRef?: string;
             orphanSha?: string;
@@ -3495,7 +3585,11 @@ export interface paths {
               durationApiMs: number | null;
               tokenUsage?: unknown;
               /** @enum {string|null} */
-              resultFix: "normalized" | "repaired" | null;
+              resultFix:
+                | "normalized"
+                | "repaired"
+                | "recovered-after-exit"
+                | null;
               repoUrl: string;
               /** @enum {string} */
               hostKind: "github" | "gitlab";
@@ -3569,6 +3663,16 @@ export interface paths {
                   | "paused"
                   | "cancelled";
                 pauseReason: string | null;
+                baselineFailures: {
+                  repo: string;
+                  reasons: string[];
+                  failingTests: string[];
+                  log?: string;
+                  run: {
+                    id: number;
+                    displayId: string;
+                  } | null;
+                }[];
                 repos: {
                   name: string;
                   url: string;
@@ -4080,7 +4184,8 @@ export interface paths {
                   | "resume"
                   | "merged"
                   | "action"
-                  | "auto-retry";
+                  | "auto-retry"
+                  | "recovered-after-exit";
                 at: string;
                 text: string;
                 runId?: number;
@@ -4115,6 +4220,7 @@ export interface paths {
                 waitingMs: number;
                 totalMs: number;
               } | null;
+              wastedAgentMs: number;
               links: {
                 /** @enum {string} */
                 kind: "ticket" | "pr";
@@ -4582,6 +4688,16 @@ export interface paths {
                 displayId: string;
                 title: string;
                 reason: string;
+                baselineFailures?: {
+                  repo: string;
+                  reasons: string[];
+                  failingTests: string[];
+                  log?: string;
+                  run: {
+                    id: number;
+                    displayId: string;
+                  } | null;
+                }[];
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -5901,6 +6017,150 @@ export interface paths {
           };
         };
         /** @description The spec is not paused */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/continue-baseline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Running again although the baseline gate failed */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "draft"
+                | "planned"
+                | "running"
+                | "finalizing"
+                | "awaiting-review"
+                | "partially-merged"
+                | "reworking"
+                | "merged"
+                | "paused"
+                | "cancelled";
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not paused by baseline-gate-failed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/recheck-baseline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Integration branches recut from current main; baseline gates run again */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "draft"
+                | "planned"
+                | "running"
+                | "finalizing"
+                | "awaiting-review"
+                | "partially-merged"
+                | "reworking"
+                | "merged"
+                | "paused"
+                | "cancelled";
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not paused by baseline-gate-failed */
         409: {
           headers: {
             [name: string]: unknown;
@@ -7911,6 +8171,16 @@ export interface paths {
                   pausedMinutes: number;
                   automatic: boolean;
                 }[];
+                wastedAgent: {
+                  totalMs: number;
+                  recoveredAfterExit: number;
+                  byStage: {
+                    stage: string;
+                    /** @enum {string} */
+                    source: "external" | "platform" | "cancelled";
+                    durationMs: number;
+                  }[];
+                };
               }[];
             };
           };

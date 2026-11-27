@@ -1,0 +1,189 @@
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import {
+  AFK_OUT_RESULT_FILE,
+  AFK_OUT_RESULT_MAX_BYTES,
+  type AgentRunner,
+  type AgentRunResult,
+  lastAssistantFromCursorLine,
+  recoverStructuredOutput,
+  resultBlock,
+} from "@afk/pipeline";
+import { commitsOnBranch, slotWorktreesClean } from "../slot-worktree.ts";
+
+type OutputSchema = Parameters<typeof recoverStructuredOutput>[0];
+
+export const RECOVERED_AFTER_EXIT = "recovered-after-exit" as const;
+export const RECOVERED_AFTER_EXIT_NOTE =
+  "agent 进程异常退出，平台按它已写好的结果收下";
+
+export const RECOVER_AFTER_EXIT_STAGES = new Set([
+  "implement",
+  "gate-fix",
+  "review-fix",
+  "merge-fix",
+  "final-fix",
+  "final-tidy",
+  "update-branch",
+]);
+
+function parseResultFile(resultDir: string): unknown | undefined {
+  const path = join(resultDir, AFK_OUT_RESULT_FILE);
+  if (!existsSync(path)) return undefined;
+  const info = statSync(path);
+  if (!info.isFile() || info.size > AFK_OUT_RESULT_MAX_BYTES) return undefined;
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function outputOf<Output>(
+  schema: OutputSchema,
+  resultDir: string,
+  lastAssistant: string | undefined,
+): Output | undefined {
+  const fromFile = parseResultFile(resultDir);
+  if (fromFile !== undefined) {
+    const recovered = recoverStructuredOutput(schema, { output: fromFile });
+    if (recovered.ok) return recovered.output as Output;
+  }
+  if (!lastAssistant) return undefined;
+  const tagged = resultBlock(lastAssistant, "result");
+  const recovered = recoverStructuredOutput(schema, {
+    ...(tagged !== undefined ? { rawMatched: tagged } : { lastAssistant }),
+  });
+  return recovered.ok ? (recovered.output as Output) : undefined;
+}
+
+export function recoverAfterAbnormalExit<Output>(input: {
+  result: AgentRunResult<Output>;
+  schema: OutputSchema;
+  resultDir: string;
+  lastAssistant?: string;
+  slotDir?: string;
+  branch?: string;
+  baseSha?: string;
+  inherited?: boolean;
+  requireCommit?: boolean;
+}):
+  | { kind: "skip" }
+  | {
+      kind: "recovered";
+      result: AgentRunResult<Output>;
+      originalError: string;
+    }
+  | { kind: "job-failure" } {
+  const { result } = input;
+  if (!result.error || result.errorKind !== "other") return { kind: "skip" };
+
+  const output = outputOf<Output>(
+    input.schema,
+    input.resultDir,
+    input.lastAssistant,
+  );
+  if (output === undefined) return { kind: "job-failure" };
+
+  let commits = result.commits;
+  if (input.slotDir !== undefined) {
+    if (!slotWorktreesClean(input.slotDir)) return { kind: "job-failure" };
+
+    const status =
+      output && typeof output === "object" && "status" in output
+        ? (output as { status?: unknown }).status
+        : undefined;
+    if (status !== "done" && status !== "cannot-proceed") {
+      return { kind: "job-failure" };
+    }
+    if (status === "cannot-proceed") {
+      const blocked = output as {
+        blockedReason?: unknown;
+        detail?: unknown;
+      };
+      if (
+        typeof blocked.blockedReason !== "string" ||
+        blocked.blockedReason.length === 0 ||
+        typeof blocked.detail !== "string" ||
+        blocked.detail.length === 0
+      ) {
+        return { kind: "job-failure" };
+      }
+    }
+    if (input.baseSha === undefined || input.branch === undefined) {
+      return { kind: "job-failure" };
+    }
+    commits = commitsOnBranch(input.slotDir, input.branch, input.baseSha).map(
+      (commit) => commit.sha,
+    );
+    const hasCommits = commits.length > 0 || Boolean(input.inherited);
+    if (status === "done" && input.requireCommit && !hasCommits) {
+      return { kind: "job-failure" };
+    }
+  }
+  const originalError = result.error;
+  return {
+    kind: "recovered",
+    originalError,
+    result: {
+      ...result,
+      output,
+      commits,
+      resultFix: RECOVERED_AFTER_EXIT,
+      error: undefined,
+      errorKind: undefined,
+    },
+  };
+}
+
+export function wrapRecoverAfterExit(
+  runner: AgentRunner,
+  input: {
+    resultDirFor: (options: { stage: string; branch: string }) => string;
+    onRecovered?: () => void;
+  },
+): AgentRunner {
+  return {
+    async run(options) {
+      const resultDir =
+        options.resultDir ??
+        input.resultDirFor({
+          stage: options.stage,
+          branch: options.branch,
+        });
+      mkdirSync(resultDir, { recursive: true });
+      let lastAssistant: string | undefined;
+      const result = await runner.run({
+        ...options,
+        resultDir,
+        onRawLine: (line) => {
+          options.onRawLine?.(line);
+          const text = lastAssistantFromCursorLine(line);
+          if (text) lastAssistant = text;
+        },
+      });
+      const recovered = recoverAfterAbnormalExit({
+        result,
+        schema: options.schema,
+        resultDir,
+        lastAssistant,
+      });
+      if (recovered.kind !== "recovered") return result;
+      input.onRecovered?.();
+      const output = recovered.result.output;
+      return {
+        ...recovered.result,
+        output:
+          output !== undefined &&
+          typeof output === "object" &&
+          output !== null &&
+          !Array.isArray(output)
+            ? ({
+                ...output,
+                error: recovered.originalError,
+              } as typeof output)
+            : output,
+      };
+    },
+  };
+}

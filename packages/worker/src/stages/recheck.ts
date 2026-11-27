@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -34,6 +34,10 @@ import {
   subjectLabel,
   tip,
 } from "./common.ts";
+import {
+  RECOVERED_AFTER_EXIT_NOTE,
+  wrapRecoverAfterExit,
+} from "./recover-after-exit.ts";
 
 function bringCommit(
   slot: Slot,
@@ -113,14 +117,30 @@ export async function recheck(
     const { refs, refShas } = await snapshotRefs(deps, bundle);
     const given = writePrompt(tmp, promptFor("recheck"));
     const options = runOptions(deps, context, "spec");
-    const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
+    const schema = reviewOutputSchemaFor("spec");
+    const logDir = join(
+      deps.sandboxLogsRoot ?? join(deps.tmpRoot ?? tmpdir(), "sandbox-logs"),
+      runIdOf(bundle),
+    );
+    const resultDir = join(logDir, "afk-out");
+    rmSync(resultDir, { recursive: true, force: true });
+    mkdirSync(resultDir, { recursive: true });
+    const runner = wrapRecoverAfterExit(
+      deps.makeAgentRunner(slot.dir, runIdOf(bundle), logDir),
+      {
+        resultDirFor: () => resultDir,
+        onRecovered: () => log(RECOVERED_AFTER_EXIT_NOTE),
+      },
+    );
+    const run = await runner.run({
       stage: "recheck",
       branch,
       baseBranch: bundle.integrationBranch as string,
       promptFile: given.promptFile,
       ctxDir,
       refs,
-      schema: reviewOutputSchemaFor("spec"),
+      schema,
+      resultDir,
       ...options,
       signal: context.signal,
     });
@@ -137,6 +157,7 @@ export async function recheck(
         `recheck: WARNING Recheck made ${run.commits.length} commit(s); it should only read`,
       );
     const sources = reviewSources(run.output);
+    const output = run.output ?? { error: run.error };
     return {
       stage: "recheck",
       outcome: verdict.kind === "outcome" ? verdict.outcome : "invalid-output",
@@ -149,7 +170,7 @@ export async function recheck(
         durationMs: run.durationMs,
         ...agentFacts(deps, options, given.prompt, run),
         ...(refs.length ? { refShas } : {}),
-        output: run.output ?? { error: run.error },
+        output,
         ...(sources ? { sources } : {}),
       },
       findings: run.output ? reviewFindings(run.output) : [],

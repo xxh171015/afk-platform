@@ -71,6 +71,11 @@ const server = () =>
             untouchedRate: null,
           },
           agentsPauses: [],
+          wastedAgent: {
+            totalMs: 0,
+            recoveredAfterExit: 0,
+            byStage: [],
+          },
         })),
       },
     }),

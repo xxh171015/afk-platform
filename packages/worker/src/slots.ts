@@ -11,8 +11,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { git, gitOrThrow } from "@afk/pipeline";
+import { git, gitOrThrow, hasRef, isAncestor } from "@afk/pipeline";
 import { parseTicketBranch } from "@afk/shared";
+import { orphanRefFor, salvageRefFor } from "./align-ticket-branch.ts";
+import {
+  commitsOnBranch,
+  slotSafeGit,
+  slotWorktreePlaces,
+} from "./slot-worktree.ts";
 
 // Slots: every task gets its own throwaway clone of the repo, so whatever an agent breaks, it breaks in its own
 // copy (docs/design.md「Git 操作规范」). The number of slots is the worker's concurrency limit (GLOSSARY: Slot).
@@ -26,7 +32,7 @@ export interface SlotTask {
   attempt: number;
   repo: string; // directory name of the repo, e.g. "backend"
   repoUrl?: string; // the origin, so two backends on different hosts do not share a main clone
-  ref: string; // the ticket's branch, agent/<id>/T-123: the only ref that is ever taken back
+  ref: string; // the ticket's branch, agent/<id>/T-123: fail-time and success retrieve this; rebuild salvage writes a backup ref
   integration?: string; // the branch it was made from, put in the slot on purpose: not an extra ref
   defaultBranch?: string; // the repo's own default branch; the slot has it as plumbing, not extra
 }
@@ -72,12 +78,6 @@ export function processAlive(pid: number): boolean {
     return errnoCode(error) === "EPERM"; // exists, just not ours
   }
 }
-
-// The clone is writable from inside the sandbox, so its own .git/config is not to be trusted: no filesystem
-// monitor, no hooks and no external diff or text conversion programs may run on the host because of it.
-const SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
-const safeGit = (clone: string, args: string[]) =>
-  git(clone, [...SAFE, ...args]);
 
 export class SlotManager {
   private readonly options: SlotManagerOptions;
@@ -234,8 +234,9 @@ export class SlotManager {
     ]);
   }
 
-  // 1 take back the commits the task made, 2 save uncommitted changes as a diff, 3 delete the clone. If the
-  // commits could not be taken back, the clone is moved out of the way instead of deleted.
+  // 1 write the commits the task made to a salvage backup ref (not the ticket branch), 2 save uncommitted
+  // changes as a diff, 3 delete the clone. If the commits could not be taken back, the clone is moved out of
+  // the way instead of deleted. Fail-time salvage is a separate path (salvageFailedSlot).
   private salvage(index: number, previous: SlotTask | undefined) {
     const dir = this.slotDir(index);
     const keep = (why: string, clone: string, label: string) => {
@@ -260,9 +261,8 @@ export class SlotManager {
     }
     const clone = join(dir, previous.repo);
     if (existsSync(clone)) {
-      const taken = retrieveResult({
+      const inspected = inspectSlotRefs({
         slotClone: clone,
-        mainClone: this.options.mainCloneFor(previous.repo, previous.repoUrl),
         ref: previous.ref,
         ...(previous.integration ? { integration: previous.integration } : {}),
         ...(previous.defaultBranch
@@ -270,6 +270,16 @@ export class SlotManager {
           : {}),
         log: (line) => this.log(`slot ${index}: ${line}`),
       });
+      let error: string | undefined;
+      if (inspected.hasWanted) {
+        error = fetchSlotRef(
+          this.options.mainCloneFor(previous.repo, previous.repoUrl),
+          clone,
+          inspected.wanted,
+          salvageRefFor(previous.ref, previous.jobId, previous.attempt),
+          true,
+        );
+      }
       const diff = uncommittedChanges(clone);
       if (diff) {
         mkdirSync(this.options.salvageDir, { recursive: true });
@@ -280,9 +290,9 @@ export class SlotManager {
         writeFileSync(file, diff);
         this.log(`slot ${index}: saved uncommitted changes to ${file}`);
       }
-      if (taken.error) {
+      if (error) {
         keep(
-          `could not take back ${previous.ref} (${taken.error})`,
+          `could not take back ${previous.ref} (${error})`,
           clone,
           `job-${previous.jobId}-attempt-${previous.attempt}`,
         );
@@ -338,22 +348,30 @@ function readLast(path: string): SlotTask | undefined {
   }
 }
 
+export const SALVAGE_DIFF_MAX_BYTES = 1_000_000;
+
+export type SalvageCommit = { sha: string; subject: string };
+
+export type FailSalvage = {
+  commits: SalvageCommit[];
+  hadDiff: boolean;
+  diffTooLarge: boolean;
+};
+
 export interface RetrieveResult {
   fetched: boolean;
   extraRefs: string[]; // refs the slot has besides the ticket's own: logged, never taken back
   error?: string;
+  orphan?: { orphanRef: string; orphanSha: string };
 }
 
-// Takes the ticket's branch from a slot into the main clone: that one ref, no tags, with object checking on,
-// because the slot's content came out of a sandbox. Whatever else the slot holds stays there.
-export function retrieveResult(input: {
+function inspectSlotRefs(input: {
   slotClone: string;
-  mainClone: string;
   ref: string;
-  integration?: string; // the branch the ticket was made from, which the slot has on purpose
-  defaultBranch?: string; // plumbing in the slot; default main
+  integration?: string;
+  defaultBranch?: string;
   log?: (line: string) => void;
-}): RetrieveResult {
+}): { wanted: string; extraRefs: string[]; hasWanted: boolean } {
   const label = parseTicketBranch(input.ref);
   if (!label) throw new RangeError(`not a ticket branch: ${input.ref}`);
   const wanted = `refs/heads/${input.ref}`;
@@ -364,47 +382,99 @@ export function retrieveResult(input: {
     `refs/heads/${input.defaultBranch ?? "main"}`,
     ...(input.integration ? [`refs/heads/${input.integration}`] : []),
   ]);
-  const refs = safeGit(input.slotClone, ["for-each-ref", "--format=%(refname)"])
+  const refs = slotSafeGit(input.slotClone, [
+    "for-each-ref",
+    "--format=%(refname)",
+  ])
     .stdout.split("\n")
     .filter((ref) => ref && !ref.startsWith("refs/remotes/"));
   const extraRefs = refs.filter((ref) => !expected.has(ref));
   for (const ref of extraRefs)
     input.log?.(`extra ref in the slot, not taken back: ${ref}`);
-  if (!refs.includes(wanted)) return { fetched: false, extraRefs };
-  const fetch = git(input.mainClone, [
+  return { wanted, extraRefs, hasWanted: refs.includes(wanted) };
+}
+
+function fetchError(fetch: { code: number; out: string }): string {
+  return fetch.out.trim().slice(0, 400) || `git fetch exited ${fetch.code}`;
+}
+
+function fetchSlotRef(
+  mainClone: string,
+  slotClone: string,
+  src: string,
+  dest: string,
+  force = false,
+): string | undefined {
+  const fetch = git(mainClone, [
     "-c",
     "transfer.fsckObjects=true",
     "fetch",
     "--quiet",
     "--no-tags",
-    input.slotClone,
-    `${wanted}:${wanted}`,
+    slotClone,
+    `${force ? "+" : ""}${src}:${dest}`,
   ]);
-  return fetch.code === 0
-    ? { fetched: true, extraRefs }
-    : {
-        fetched: false,
-        extraRefs,
-        error:
-          fetch.out.trim().slice(0, 400) || `git fetch exited ${fetch.code}`,
-      };
+  return fetch.code === 0 ? undefined : fetchError(fetch);
+}
+
+// Takes the ticket's branch from a slot into the main clone: that one ref, no tags, with object checking on,
+// because the slot's content came out of a sandbox. Whatever else the slot holds stays there. If the main
+// clone's ticket branch is not an ancestor of this result, the old tip is kept as an orphan and this result
+// wins.
+export function retrieveResult(input: {
+  slotClone: string;
+  mainClone: string;
+  ref: string;
+  integration?: string; // the branch the ticket was made from, which the slot has on purpose
+  defaultBranch?: string; // plumbing in the slot; default main
+  log?: (line: string) => void;
+}): RetrieveResult {
+  const inspected = inspectSlotRefs(input);
+  const { wanted, extraRefs, hasWanted } = inspected;
+  if (!hasWanted) return { fetched: false, extraRefs };
+  const incoming = `refs/afk/incoming/${input.ref}`;
+  const error = fetchSlotRef(
+    input.mainClone,
+    input.slotClone,
+    wanted,
+    incoming,
+    true,
+  );
+  if (error) {
+    git(input.mainClone, ["update-ref", "-d", incoming]);
+    return { fetched: false, extraRefs, error };
+  }
+  try {
+    const incomingSha = gitOrThrow(input.mainClone, ["rev-parse", incoming]);
+    const local = hasRef(input.mainClone, wanted)
+      ? gitOrThrow(input.mainClone, ["rev-parse", wanted])
+      : undefined;
+    let orphan: RetrieveResult["orphan"];
+    if (
+      local &&
+      local !== incomingSha &&
+      !isAncestor(input.mainClone, local, incomingSha)
+    ) {
+      const orphanRef = orphanRefFor(input.ref, local);
+      gitOrThrow(input.mainClone, ["update-ref", orphanRef, local]);
+      orphan = { orphanRef, orphanSha: local };
+    }
+    gitOrThrow(input.mainClone, ["update-ref", wanted, incomingSha]);
+    return { fetched: true, extraRefs, ...(orphan ? { orphan } : {}) };
+  } finally {
+    git(input.mainClone, ["update-ref", "-d", incoming]);
+  }
 }
 
 // What was not committed, as a diff that can be applied again: tracked changes and the content of new files
 // (made visible with intent-to-add; the clone is thrown away afterwards), for the clone and every worktree
 // Sandcastle left inside it. Nothing here runs programs configured by the clone.
 function uncommittedChanges(clone: string): string | undefined {
-  const places = [clone];
-  const worktrees = join(clone, ".sandcastle", "worktrees");
-  if (existsSync(worktrees)) {
-    for (const name of readdirSync(worktrees))
-      places.push(join(worktrees, name));
-  }
   const parts: string[] = [];
-  for (const place of places) {
-    if (!safeGit(place, ["status", "--porcelain"]).stdout.trim()) continue;
-    safeGit(place, ["add", "--intent-to-add", "--all"]);
-    const diff = safeGit(place, [
+  for (const place of slotWorktreePlaces(clone)) {
+    if (!slotSafeGit(place, ["status", "--porcelain"]).stdout.trim()) continue;
+    slotSafeGit(place, ["add", "--intent-to-add", "--all"]);
+    const diff = slotSafeGit(place, [
       "diff",
       "HEAD",
       "--binary",
@@ -414,4 +484,89 @@ function uncommittedChanges(clone: string): string | undefined {
     parts.push(`# ${place}\n${diff}`);
   }
   return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
+export function salvageDiffFile(jobId: number, attempt: number): string {
+  return `job-${jobId}-attempt-${attempt}.diff`;
+}
+
+export function latestSalvageDiffFile(ref: string): string {
+  return `latest-${ref.replaceAll("/", "-")}.diff`;
+}
+
+function salvageCommits(
+  mainClone: string,
+  ref: string,
+  integration?: string,
+): SalvageCommit[] {
+  const since =
+    integration &&
+    git(mainClone, [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/heads/${integration}`,
+    ]).code === 0
+      ? integration
+      : undefined;
+  return commitsOnBranch(mainClone, ref, since);
+}
+
+// An agent-stage job that failed (not recovered-after-exit): take the ticket branch back now, and keep
+// uncommitted work as a diff, so the next Run — on any slot — can continue from here. The clone stays
+// until release("failure"); rebuild salvage is a separate path (#386).
+export function salvageFailedSlot(input: {
+  slotClone: string;
+  mainClone: string;
+  task: SlotTask;
+  salvageDir: string;
+  log?: (line: string) => void;
+}): FailSalvage {
+  const taken = retrieveResult({
+    slotClone: input.slotClone,
+    mainClone: input.mainClone,
+    ref: input.task.ref,
+    ...(input.task.integration ? { integration: input.task.integration } : {}),
+    ...(input.task.defaultBranch
+      ? { defaultBranch: input.task.defaultBranch }
+      : {}),
+    log: input.log,
+  });
+  if (taken.error)
+    input.log?.(`could not take back ${input.task.ref} (${taken.error})`);
+  const commits = salvageCommits(
+    input.mainClone,
+    input.task.ref,
+    input.task.integration,
+  );
+  const diff = existsSync(input.slotClone)
+    ? uncommittedChanges(input.slotClone)
+    : undefined;
+  if (!diff) return { commits, hadDiff: false, diffTooLarge: false };
+  const bytes = Buffer.byteLength(diff, "utf8");
+  const diffTooLarge = bytes > SALVAGE_DIFF_MAX_BYTES;
+  mkdirSync(input.salvageDir, { recursive: true });
+  const jobFile = join(
+    input.salvageDir,
+    salvageDiffFile(input.task.jobId, input.task.attempt),
+  );
+  writeFileSync(jobFile, diff);
+  input.log?.(`saved uncommitted changes to ${jobFile}`);
+  if (!diffTooLarge) {
+    writeFileSync(
+      join(input.salvageDir, latestSalvageDiffFile(input.task.ref)),
+      diff,
+    );
+  }
+  return { commits, hadDiff: true, diffTooLarge };
+}
+
+export function readLatestSalvageDiff(
+  salvageDir: string,
+  ref: string,
+): string | undefined {
+  const path = join(salvageDir, latestSalvageDiffFile(ref));
+  if (!existsSync(path)) return undefined;
+  if (statSync(path).size > SALVAGE_DIFF_MAX_BYTES) return undefined;
+  return readFileSync(path, "utf8");
 }

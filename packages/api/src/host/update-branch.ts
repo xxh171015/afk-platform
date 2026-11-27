@@ -58,7 +58,7 @@ const PAUSE_FROM_MERGE: Record<"conflict" | "gate-failed", PauseReason> = {
   "gate-failed": "update-branch-gate-failed",
 };
 
-const SPECS_THAT_WATCH_MAIN: SpecState[] = [
+export const SPECS_THAT_WATCH_MAIN: SpecState[] = [
   "running",
   "reworking",
   "finalizing",
@@ -135,7 +135,7 @@ export async function markUpdateBranchClaimed(
   ]);
 }
 
-const updateBranchKeyPrefix = (specId: number, repoId: number) =>
+export const updateBranchKeyPrefix = (specId: number, repoId: number) =>
   `${formatDisplayId("spec", specId)}:repo-${repoId}:update-branch:`;
 
 async function nextUpdateBranchKey(
@@ -259,7 +259,7 @@ async function enqueueUpdateBranchRecheck(
   });
 }
 
-async function enqueueUpdateBranchFix(
+export async function enqueueUpdateBranchFix(
   client: pg.PoolClient,
   target: {
     specId: number;
@@ -267,6 +267,7 @@ async function enqueueUpdateBranchFix(
     mainSha: string;
     pauseReason: PauseReason;
   },
+  notBefore?: Date,
 ): Promise<void> {
   await enqueueJob(client, {
     type: "agent-run",
@@ -283,6 +284,7 @@ async function enqueueUpdateBranchFix(
       target.specId,
       target.repoId,
     ),
+    ...(notBefore ? { notBefore } : {}),
   });
 }
 
@@ -655,7 +657,7 @@ async function failQueuedUpdateBranches(
   );
 }
 
-async function pauseForUpdateBranch(
+export async function pauseForUpdateBranch(
   client: pg.PoolClient,
   specId: number,
   reason: PauseReason,

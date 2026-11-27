@@ -128,24 +128,34 @@ async function failNext(
 describe("a job the worker could not carry out", () => {
   it("still requeues a network error, and blocks only after the third failure", async () => {
     await runningSpec([ticket("a")]);
-    await failNext(
+    const network = [
       "fatal: unable to access 'https://github.com/x.git/': Could not resolve host: github.com",
-    );
+      "Failed to connect to github.com port 443: Connection timed out",
+      "Premature close",
+      "socket disconnected",
+      "Failed to connect to gitlab.com port 443: Connection refused",
+    ];
+    await failNext(network[0]);
     expect((await state()).state).toBe("running");
     expect((await keys()).map((k) => k.state)).toEqual(["failed", "queued"]);
-    clock.advanceSeconds(10);
-    await failNext(
-      "Failed to connect to github.com port 443: Connection timed out",
-    );
+    clock.advanceSeconds(30);
+    await failNext(network[1]);
     expect((await state()).state).toBe("running");
-    await failNext(
-      "fatal: unable to access: Failed to connect to github.com port 443 after 135002 ms: Couldn't connect to server",
-    );
+    clock.advanceSeconds(120);
+    await failNext(network[2]);
+    expect((await state()).state).toBe("running");
+    clock.advanceSeconds(300);
+    await failNext(network[3]);
+    expect((await state()).state).toBe("running");
+    clock.advanceSeconds(600);
+    await failNext(network[4]);
     expect(await state()).toEqual({
       state: "blocked",
       blocked_reason: "job-failed",
     });
     expect((await keys()).map((k) => k.state)).toEqual([
+      "failed",
+      "failed",
       "failed",
       "failed",
       "failed",
@@ -155,30 +165,83 @@ describe("a job the worker could not carry out", () => {
 
   it("waits 10s then 30s before requeueing a ticket stage that failed as an outside service, and blocks at the third", async () => {
     await runningSpec([ticket("a")]);
-    const firstAt = clock.now();
-    await failNext("Failed to reach the Cursor API");
-    expect((await queuedNotBefore())?.getTime()).toBe(
-      firstAt.getTime() + 10_000,
-    );
-    expect(await claim()).toBeNull();
-    expect((await state()).state).toBe("running");
-
-    clock.advanceSeconds(10);
-    const secondAt = clock.now();
-    await failNext("Failed to reach the Cursor API");
-    expect((await queuedNotBefore())?.getTime()).toBe(
-      secondAt.getTime() + 30_000,
-    );
-    expect(await claim()).toBeNull();
-    expect((await state()).state).toBe("running");
-
-    clock.advanceSeconds(30);
+    const waits = [30_000, 120_000, 300_000, 600_000];
+    for (const wait of waits) {
+      const at = clock.now();
+      await failNext("Failed to reach the Cursor API");
+      expect((await queuedNotBefore())?.getTime()).toBe(at.getTime() + wait);
+      expect(await claim()).toBeNull();
+      expect((await state()).state).toBe("running");
+      clock.advanceSeconds(wait / 1000);
+    }
     await failNext("Failed to reach the Cursor API");
     expect(await state()).toEqual({
       state: "blocked",
       blocked_reason: "job-failed",
     });
     expect(await claim()).toBeNull();
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.tickets[0]).toMatchObject({
+      blockedReason: "job-failed",
+      failureSource: "external",
+    });
+  });
+
+  it("does not spend the platform's three failures on outside-service errors", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext("docker daemon not running");
+    await failNext("docker daemon not running");
+    for (const wait of [30, 120, 300, 600]) {
+      await failNext("Failed to reach the Cursor API");
+      expect((await state()).state).toBe("running");
+      expect(await queuedNotBefore()).not.toBeNull();
+      clock.advanceSeconds(wait);
+    }
+    expect((await state()).state).toBe("running");
+    expect((await keys()).filter((k) => k.state === "failed")).toHaveLength(6);
+    expect(await claim()).not.toBeNull();
+  });
+
+  it("blocks on the third platform failure with no wait, after outside-service failures", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext("docker daemon not running");
+    await failNext("docker daemon not running");
+    for (const wait of [30, 120, 300, 600]) {
+      await failNext("Failed to reach the Cursor API");
+      clock.advanceSeconds(wait);
+    }
+    await failNext("docker daemon not running");
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect(await queuedNotBefore()).toBeNull();
+    expect(await claim()).toBeNull();
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.tickets[0]).toMatchObject({
+      blockedReason: "job-failed",
+      failureSource: "platform",
+    });
+  });
+
+  it("starts both failure counts from job_floor after a person retries", async () => {
+    await runningSpec([ticket("a")]);
+    for (const wait of [30, 120, 300, 600]) {
+      await failNext("Failed to reach the Cursor API");
+      clock.advanceSeconds(wait);
+    }
+    await failNext("Failed to reach the Cursor API");
+    expect((await state()).state).toBe("blocked");
+    await call("POST", "/tickets/1/retry", { mode: "continue" });
+    await failNext("docker daemon not running");
+    await failNext("docker daemon not running");
+    for (const wait of [30, 120, 300, 600]) {
+      await failNext("Failed to reach the Cursor API");
+      expect((await state()).state).toBe("running");
+      clock.advanceSeconds(wait);
+    }
+    expect((await state()).state).toBe("running");
+    expect(await claim()).not.toBeNull();
   });
 
   it("requeues a platform failure with no not_before", async () => {
@@ -673,6 +736,118 @@ describe("a job the worker could not carry out", () => {
     expect((await worker.fail(job.id, job.attempt, "x")).status).toBe(200);
     expect((await keys())[0]?.state).toBe("failed");
   });
+
+  it("leaves a Retry note on the next implement Run after a job-failed requeue, with retrieved commits and salvage.diff", async () => {
+    await runningSpec([ticket("a")]);
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("implement");
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [
+              {
+                sha: "abc1111111111111111111111111111111111111",
+                subject: "export orders as csv",
+              },
+            ],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const failed = (
+      await db.pool.query<{ output: Record<string, unknown> }>(
+        "SELECT output FROM runs WHERE job_id = $1",
+        [job.id],
+      )
+    ).rows[0];
+    expect(failed.output).toMatchObject({
+      error: "Error: agent crashed",
+      salvage: {
+        commits: [
+          {
+            sha: "abc1111111111111111111111111111111111111",
+            subject: "export orders as csv",
+          },
+        ],
+        hadDiff: true,
+        diffTooLarge: false,
+      },
+    });
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("implement");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
+    expect(note).toContain("export orders as csv");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).toContain("先核对验收测试");
+    expect(note).toContain("已完成就直接出结果");
+  });
+
+  it("says the uncommitted diff was too large when the worker omitted it", async () => {
+    await runningSpec([ticket("a")]);
+    const job = (await claim()) as Claimed;
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: { commits: [], hadDiff: true, diffTooLarge: true },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("太大，没有提供");
+    expect(note).not.toContain("/context/salvage.diff");
+  });
+
+  it("leaves a Retry note on the next review Run after a job-failed requeue", async () => {
+    await runningSpec([ticket("a")]);
+    for (const [stage, outcome] of [
+      ["implement", "done"],
+      ["gate", "passed"],
+    ] as const) {
+      const job = (await claim()) as Claimed;
+      await worker.complete(job.id, job.attempt, { stage, outcome });
+    }
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("review");
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("review");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).toContain("先核对验收测试");
+  });
 });
 
 describe("a lease that ran out while the API was down", () => {
@@ -775,6 +950,23 @@ describe("a lease that ran out", () => {
     const lost = await loseLease();
     const again = (await claim()) as Claimed;
     expect(again).toMatchObject({ id: lost.id, attempt: lost.attempt + 1 });
+  });
+
+  it("leaves a generic Retry note on the next implement Run after a lease ran out", async () => {
+    await runningSpec([ticket("a")]);
+    await loseLease();
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("implement");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("上次运行中断了");
+    expect(note).toContain("git log base..HEAD");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).not.toContain("第 1 分钟");
   });
 });
 
@@ -902,25 +1094,17 @@ describe("a step of the overall review that could not be carried out", () => {
 
   it("waits 10s then 30s before requeueing a wrap-up step that failed as an outside service, and blocks at the third", async () => {
     await toFinalReview();
-    const firstAt = clock.now();
-    await failNext("Failed to reach the Cursor API");
-    expect((await queuedNotBefore())?.getTime()).toBe(
-      firstAt.getTime() + 10_000,
-    );
-    expect(await claim()).toBeNull();
-    expect(
-      (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
-    ).toBe("active");
-
-    clock.advanceSeconds(10);
-    const secondAt = clock.now();
-    await failNext("Failed to reach the Cursor API");
-    expect((await queuedNotBefore())?.getTime()).toBe(
-      secondAt.getTime() + 30_000,
-    );
-    expect(await claim()).toBeNull();
-
-    clock.advanceSeconds(30);
+    const waits = [30_000, 120_000, 300_000, 600_000];
+    for (const wait of waits) {
+      const at = clock.now();
+      await failNext("Failed to reach the Cursor API");
+      expect((await queuedNotBefore())?.getTime()).toBe(at.getTime() + wait);
+      expect(await claim()).toBeNull();
+      expect(
+        (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+      ).toBe("active");
+      clock.advanceSeconds(wait / 1000);
+    }
     await failNext("Failed to reach the Cursor API");
     expect(
       (await db.pool.query("SELECT state, blocked_reason FROM finalizations"))
@@ -930,6 +1114,81 @@ describe("a step of the overall review that could not be carried out", () => {
       blocked_reason: "job-failed",
     });
     expect(await claim()).toBeNull();
+    const blocked = (
+      await db.pool.query<{ failure_source: string | null }>(
+        `SELECT failure_source FROM events
+         WHERE type = 'finalization' AND to_state = 'blocked'
+         ORDER BY id DESC LIMIT 1`,
+      )
+    ).rows[0];
+    expect(blocked.failure_source).toBe("external");
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.finalizations[0]).toMatchObject({
+      blockedReason: "job-failed",
+      failureSource: "external",
+    });
+  });
+
+  it("does not spend wrap-up platform failures on outside-service errors", async () => {
+    await toFinalReview();
+    await failNext("docker daemon not running");
+    await failNext("docker daemon not running");
+    for (const wait of [30, 120, 300, 600]) {
+      await failNext("Failed to reach the Cursor API");
+      expect(
+        (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+      ).toBe("active");
+      clock.advanceSeconds(wait);
+    }
+    expect(
+      (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+    ).toBe("active");
+    expect(await claim()).not.toBeNull();
+  });
+
+  it("blocks wrap-up on the third platform failure after outside-service failures", async () => {
+    await toFinalReview();
+    await failNext("docker daemon not running");
+    await failNext("docker daemon not running");
+    for (const wait of [30, 120, 300, 600]) {
+      await failNext("Failed to reach the Cursor API");
+      clock.advanceSeconds(wait);
+    }
+    await failNext("docker daemon not running");
+    expect(
+      (await db.pool.query("SELECT state, blocked_reason FROM finalizations"))
+        .rows[0],
+    ).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect(await claim()).toBeNull();
+  });
+
+  it("starts both wrap-up failure counts from job_floor after a person retries", async () => {
+    await toFinalReview();
+    for (const wait of [30, 120, 300, 600]) {
+      await failNext("Failed to reach the Cursor API");
+      clock.advanceSeconds(wait);
+    }
+    await failNext("Failed to reach the Cursor API");
+    expect(
+      (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+    ).toBe("blocked");
+    await call("POST", "/specs/1/final/retry");
+    await failNext("docker daemon not running");
+    await failNext("docker daemon not running");
+    for (const wait of [30, 120, 300, 600]) {
+      await failNext("Failed to reach the Cursor API");
+      expect(
+        (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+      ).toBe("active");
+      clock.advanceSeconds(wait);
+    }
+    expect(
+      (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+    ).toBe("active");
+    expect(await claim()).not.toBeNull();
   });
 
   it("is queued again, and blocks the finalization after three failures", async () => {
@@ -974,5 +1233,173 @@ describe("a step of the overall review that could not be carried out", () => {
     for (let i = 0; i < 3; i++) await failNext();
     expect((await call("POST", "/specs/1/final/retry")).status).toBe(200);
     expect((await claim())?.payload.stage).toBe("final-review");
+  });
+
+  it("leaves a Retry note on the next final-fix Run after a job-failed requeue", async () => {
+    await toFinalReview();
+    const review = (await claim()) as Claimed;
+    expect(review.payload.stage).toBe("final-review");
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", line: 1, problem: "rename" }],
+          suggestions: [],
+        },
+      },
+      findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
+    });
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("final-fix");
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [
+              {
+                sha: "def2222222222222222222222222222222222222",
+                subject: "rename the helper",
+              },
+            ],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-fix");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
+    expect(note).toContain("rename the helper");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).toContain("先核对验收测试");
+  });
+
+  it("leaves a Retry note on the next final-review Run after a job-failed requeue", async () => {
+    await toFinalReview();
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("final-review");
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-review");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).toContain("先核对验收测试");
+  });
+
+  it("leaves a generic Retry note on the next final-fix Run after a lease ran out", async () => {
+    await toFinalReview();
+    const review = (await claim()) as Claimed;
+    expect(review.payload.stage).toBe("final-review");
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", line: 1, problem: "rename" }],
+          suggestions: [],
+        },
+      },
+      findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
+    });
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("final-fix");
+    clock.advanceSeconds(121);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-fix");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("上次运行中断了");
+    expect(note).toContain("git log base..HEAD");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).not.toContain("第 1 分钟");
+  });
+
+  it("puts the platform Retry note before a person's note when they retry a job-failed wrap-up", async () => {
+    await toFinalReview();
+    const review = (await claim()) as Claimed;
+    expect(review.payload.stage).toBe("final-review");
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", line: 1, problem: "rename" }],
+          suggestions: [],
+        },
+      },
+      findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
+    });
+    const salvage = {
+      commits: [
+        {
+          sha: "def2222222222222222222222222222222222222",
+          subject: "rename the helper",
+        },
+      ],
+      hadDiff: true,
+      diffTooLarge: false,
+    };
+    for (let i = 0; i < 3; i++) {
+      const job = (await claim()) as Claimed;
+      expect(job.payload.stage).toBe("final-fix");
+      expect(
+        (
+          await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+            salvage,
+          })
+        ).status,
+      ).toBe(200);
+    }
+    const human = "take theirs on src/a.ts";
+    expect(
+      (await call("POST", "/specs/1/final/retry", { note: human })).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-fix");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("平台自动重试");
+    expect(note).toContain("rename the helper");
+    expect(note).toContain(human);
+    expect(note?.indexOf("平台自动重试") ?? -1).toBeLessThan(
+      note?.indexOf(human) ?? -1,
+    );
   });
 });

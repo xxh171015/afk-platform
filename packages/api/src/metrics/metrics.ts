@@ -1,5 +1,7 @@
 import {
+  AGENT_STAGES,
   type FailureSource,
+  failureSourceOf,
   formatDisplayId,
   lastWeekStarts,
   METRICS_WEEKS,
@@ -24,6 +26,44 @@ export type WeekLeadSpec = {
   displayId: string;
   title: string;
   totalMs: number;
+};
+
+// Agent stages whose wall time is billed as agent time. Gate, merge, e2e, and host jobs are out.
+const AGENT_TIME_STAGES = [
+  ...AGENT_STAGES,
+  "review",
+  "recheck",
+  "diagnose",
+  "final-review",
+  "final-fix",
+  "final-tidy",
+  "rework",
+  "update-branch",
+] as const;
+
+export const WASTED_AGENT_SOURCES = [
+  "external",
+  "platform",
+  "cancelled",
+] as const;
+export type WastedAgentSource = (typeof WASTED_AGENT_SOURCES)[number];
+
+export type WastedAgentRow = {
+  stage: string;
+  source: WastedAgentSource;
+  durationMs: number;
+};
+
+export type WastedAgentMetrics = {
+  totalMs: number;
+  recoveredAfterExit: number;
+  byStage: WastedAgentRow[];
+};
+
+const EMPTY_WASTED: WastedAgentMetrics = {
+  totalMs: 0,
+  recoveredAfterExit: 0,
+  byStage: [],
 };
 
 export type WeekMetrics = {
@@ -56,6 +96,7 @@ export type WeekMetrics = {
   // the agents' pauses that ended this week (agents-pause.ts), in order: they pause the whole instance, so every
   // project shows them
   agentsPauses: AgentsPauseRow[];
+  wastedAgent: WastedAgentMetrics;
 };
 
 export type AgentsPauseRow = { pausedMinutes: number; automatic: boolean };
@@ -180,6 +221,7 @@ export async function metricsView(
   );
 
   const pausesByWeek = await agentsPausesByWeek(pool, weekSet);
+  const wastedByWeek = await wastedAgentByWeek(pool, weekSet, projectId);
 
   const out: WeekMetrics[] = [];
   for (const weekStart of weeks) {
@@ -199,10 +241,120 @@ export async function metricsView(
         touched,
       ),
       agentsPauses: pausesByWeek.get(weekStart) ?? [],
+      wastedAgent: wastedByWeek.get(weekStart) ?? EMPTY_WASTED,
     });
   }
 
   return { since: since ? ymdInZone(since) : null, weeks: out };
+}
+
+type WastedRunRow = {
+  stage: string;
+  result: string | null;
+  duration_ms: number;
+  finished_at: Date | null;
+  result_fix: string | null;
+  failure_source: FailureSource | null;
+  job_error: string | null;
+};
+
+async function wastedRuns(
+  pool: pg.Pool,
+  filter: { projectId?: number; specId?: number },
+): Promise<WastedRunRow[]> {
+  return (
+    await pool.query<WastedRunRow>(
+      `SELECT r.stage, r.result, COALESCE(r.duration_ms, 0) AS duration_ms,
+              r.finished_at, r.result_fix,
+              (
+                SELECT e.failure_source
+                FROM events e
+                WHERE e.job_id IS NOT NULL AND e.job_id = r.job_id
+                  AND e.failure_source IS NOT NULL
+                ORDER BY e.id DESC
+                LIMIT 1
+              ) AS failure_source,
+              j.error AS job_error
+       FROM runs r
+       JOIN specs s ON s.id = r.spec_id
+       LEFT JOIN jobs j ON j.id = r.job_id
+       WHERE r.stage = ANY($1::text[])
+         AND (
+           r.result IN ('job-failed', 'cancelled')
+           OR r.result_fix = 'recovered-after-exit'
+         )
+         AND ($2::int IS NULL OR s.project_id = $2)
+         AND ($3::int IS NULL OR r.spec_id = $3)`,
+      [[...AGENT_TIME_STAGES], filter.projectId ?? null, filter.specId ?? null],
+    )
+  ).rows;
+}
+
+function wastedClass(row: WastedRunRow): WastedAgentSource {
+  if (row.result === "cancelled") return "cancelled";
+  if (row.failure_source === "external") return "external";
+  if (failureSourceOf("job-failed", row.job_error) === "external") {
+    return "external";
+  }
+  return "platform";
+}
+
+function rollupWasted(rows: WastedRunRow[]): WastedAgentMetrics {
+  const byKey = new Map<string, WastedAgentRow>();
+  let totalMs = 0;
+  let recoveredAfterExit = 0;
+  for (const row of rows) {
+    if (row.result_fix === "recovered-after-exit") recoveredAfterExit += 1;
+    if (row.result !== "job-failed" && row.result !== "cancelled") continue;
+    totalMs += row.duration_ms;
+    const source = wastedClass(row);
+    const key = `${row.stage}:${source}`;
+    const acc = byKey.get(key) ?? {
+      stage: row.stage,
+      source,
+      durationMs: 0,
+    };
+    acc.durationMs += row.duration_ms;
+    byKey.set(key, acc);
+  }
+  return {
+    totalMs,
+    recoveredAfterExit,
+    byStage: [...byKey.values()].sort(
+      (a, b) =>
+        b.durationMs - a.durationMs ||
+        a.stage.localeCompare(b.stage) ||
+        a.source.localeCompare(b.source),
+    ),
+  };
+}
+
+export async function specWastedAgentMs(
+  pool: pg.Pool,
+  specId: number,
+): Promise<number> {
+  return rollupWasted(await wastedRuns(pool, { specId })).totalMs;
+}
+
+async function wastedAgentByWeek(
+  pool: pg.Pool,
+  weekSet: Set<string>,
+  projectId?: number,
+): Promise<Map<string, WastedAgentMetrics>> {
+  const map = new Map<string, WastedAgentMetrics>();
+  const grouped = new Map<string, WastedRunRow[]>();
+  for (const row of await wastedRuns(pool, { projectId })) {
+    if (!row.finished_at) continue;
+    const week = weekStartYmd(row.finished_at);
+    if (!weekSet.has(week)) continue;
+    const list = grouped.get(week) ?? [];
+    list.push(row);
+    grouped.set(week, list);
+  }
+  for (const week of weekSet) {
+    map.set(week, rollupWasted(grouped.get(week) ?? []));
+  }
+  return map;
 }
 
 async function agentsPausesByWeek(

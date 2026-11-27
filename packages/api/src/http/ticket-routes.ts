@@ -34,9 +34,11 @@ import {
   approveRemovedTestsForSpec,
   cancelSpec,
   cancelTicket,
+  continueBaseline,
   editTicket,
   handbackTicket,
   parkedRetryNote,
+  recheckBaseline,
   resumeSpec,
   retrySpecCleanup,
   retryTicket,
@@ -57,6 +59,18 @@ import { ErrorReply, INT4_MAX, SpecRefView } from "./schemas.ts";
 
 const Id = z.number().int();
 const PathId = z.coerce.number().int().min(1).max(INT4_MAX);
+const BaselineFailure = z.object({
+  repo: z.string(),
+  reasons: z.array(z.string()),
+  failingTests: z.array(z.string()),
+  log: z.string().optional(),
+  run: z
+    .object({
+      id: Id,
+      displayId: z.string(),
+    })
+    .nullable(),
+});
 const json = <T extends z.ZodType>(schema: T) => ({
   "application/json": { schema },
 });
@@ -247,7 +261,9 @@ const RunView = RunRow.extend({
   sources: z.array(z.string()).nullable(),
   durationApiMs: Id.nullable(),
   tokenUsage: z.unknown().nullable(),
-  resultFix: z.enum(["normalized", "repaired"]).nullable(),
+  resultFix: z
+    .enum(["normalized", "repaired", "recovered-after-exit"])
+    .nullable(),
   repoUrl: z.string(),
   hostKind: z.enum(HOST_KINDS),
 });
@@ -355,6 +371,7 @@ const specRoute = createRoute({
           body: z.string(),
           state: z.enum(SPEC_STATES),
           pauseReason: z.string().nullable(),
+          baselineFailures: z.array(BaselineFailure),
           repos: z.array(RepoIdentity),
           refs: z.array(SpecRefView),
           integrationBranches: z.array(
@@ -457,6 +474,7 @@ const specRoute = createRoute({
             totalMs: z.number().int(),
           })
           .nullable(),
+        wastedAgentMs: z.number().int(),
         links: z.array(LinkRow),
         usageByStage: z.array(
           z.object({
@@ -647,6 +665,7 @@ const BlockedQueue = z.object({
         displayId: z.string(),
         title: z.string(),
         reason: z.string(),
+        baselineFailures: z.array(BaselineFailure).optional(),
       })
       .merge(WaitingFields),
   ),
@@ -1112,6 +1131,34 @@ const allowSpecRoute = createRoute({
   },
 });
 
+const continueBaselineRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/continue-baseline",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Running again although the baseline gate failed",
+      z.object({ state: z.enum(SPEC_STATES) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec is not paused by baseline-gate-failed", ErrorReply),
+  },
+});
+
+const recheckBaselineRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/recheck-baseline",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Integration branches recut from current main; baseline gates run again",
+      z.object({ state: z.enum(SPEC_STATES) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec is not paused by baseline-gate-failed", ErrorReply),
+  },
+});
+
 const cancelSpecRoute = createRoute({
   method: "post",
   path: "/specs/{id}/cancel",
@@ -1481,6 +1528,28 @@ export function registerTicketRoutes(
   app.openapi(allowSpecRoute, async (c) => {
     const result = await aroundSpec(context, c.req.valid("param").id, () =>
       allowSpec(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(continueBaselineRoute, async (c) => {
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      continueBaseline(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(recheckBaselineRoute, async (c) => {
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      recheckBaseline(pool, c.req.valid("param").id),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);

@@ -16,6 +16,7 @@ describe("failure source of a reason code", () => {
     expect(failureSourceOf("merge-conflict")).toBe("spec");
     expect(failureSourceOf("integration-environment-failed")).toBe("spec");
     expect(failureSourceOf("update-branch-gate-failed")).toBe("spec");
+    expect(failureSourceOf("baseline-gate-failed")).toBe("spec");
     expect(failureSourceOf("planning-conflict")).toBe("spec");
     expect(failureSourceOf("bug-unlocated")).toBe("spec");
     expect(failureSourceOf("branch-moved")).toBe("spec");
@@ -58,6 +59,7 @@ describe("pause reason labels", () => {
     );
     expect(pauseReasonLabel(null)).toBe("已暂停");
     expect(pauseReasonLabel("mystery")).toBe("mystery");
+    expect(pauseReasonLabel("baseline-gate-failed")).toBe("基线门禁失败");
     expect(PAUSE_REASONS.map(pauseReasonLabel)).toEqual([
       "agent 时间用完",
       "合 main 有冲突",
@@ -66,6 +68,7 @@ describe("pause reason labels", () => {
       "作业失败",
       "删了测试，等人批准",
       "Recheck 不是 pass，等人批准",
+      "基线门禁失败",
     ]);
   });
 });
@@ -95,6 +98,15 @@ describe("failure source of a failed job", () => {
     "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
     "gate setup failed (exit 124)\nProgress: resolved 812, reused 790, downloaded 3",
     "Failed to reach the Cursor API",
+    "Premature close",
+    "socket disconnected before the response completed",
+    "Could not establish a secure TLS connection",
+    "resume attempts made no progress",
+    "fatal: unable to access 'https://github.com/x.git/': The requested URL returned error: 502",
+    "fatal: unable to access 'http://git.internal/x.git/': Failed to connect",
+    "SSL certificate problem: unable to get local issuer certificate",
+    "Failed to connect to github.com port 443: Connection timed out",
+    "Failed to connect to gitlab.com port 443: Connection refused",
   ];
   const platform = [
     "could not push agent/T-4: ! [rejected] agent/T-4 -> agent/T-4 (non-fast-forward)",

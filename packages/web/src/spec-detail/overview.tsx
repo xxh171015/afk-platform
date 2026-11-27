@@ -23,6 +23,7 @@ import { ticketProgress } from "../spec-flow.ts";
 import { TIMELINE_LABELS, timelineLabel } from "../spec-timeline.ts";
 import { peekTicketClick } from "../TicketDetail.tsx";
 import { TraceSection } from "../TraceSection.tsx";
+import { formatCompactDuration } from "../time.ts";
 import { formatTokens } from "../token-usage.ts";
 import { DependencyGraph } from "./dependency-graph.tsx";
 import { LeadTimeBar } from "./lead-time.tsx";
@@ -46,6 +47,7 @@ export function Overview({
   hostKind,
   potentialConflicts,
   leadTime,
+  wastedAgentMs,
   usageByStage,
   links,
 }: {
@@ -66,6 +68,7 @@ export function Overview({
   hostKind: HostKind;
   potentialConflicts: NonNullable<SpecView["potentialConflicts"]>;
   leadTime: SpecView["leadTime"];
+  wastedAgentMs: number;
   usageByStage: NonNullable<SpecView["usageByStage"]>;
   links: NonNullable<SpecView["links"]>;
 }) {
@@ -219,6 +222,16 @@ export function Overview({
           </dd>
         </div>
         {leadTime ? <LeadTimeBar leadTime={leadTime} /> : null}
+        {wastedAgentMs > 0 ? (
+          <div data-testid="wasted-agent">
+            <dt className="text-xs text-muted-foreground">
+              没有产出的 agent 时间
+            </dt>
+            <dd className="mt-1 font-mono text-xs tabular">
+              {formatCompactDuration(wastedAgentMs)}
+            </dd>
+          </div>
+        ) : null}
         {usageByStage.length > 0 ? (
           <div className="sm:col-span-2" data-testid="usage-by-stage">
             <dt className="text-xs text-muted-foreground">用量</dt>

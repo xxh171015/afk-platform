@@ -40,6 +40,7 @@ export const PAUSE_REASONS = [
   "job-failed",
   "tests-removed",
   "recheck-failed",
+  "baseline-gate-failed",
 ] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
 
@@ -51,6 +52,7 @@ export const PAUSE_REASON_LABELS: Record<PauseReason, string> = {
   "job-failed": "作业失败",
   "tests-removed": "删了测试，等人批准",
   "recheck-failed": "Recheck 不是 pass，等人批准",
+  "baseline-gate-failed": "基线门禁失败",
 };
 
 export function pauseReasonLabel(reason: string | null | undefined): string {
@@ -120,6 +122,7 @@ export const FAILURE_SOURCE_OF_REASON: Record<
   "integration-environment-failed": "spec",
   "update-branch-conflict": "spec",
   "update-branch-gate-failed": "spec",
+  "baseline-gate-failed": "spec",
   "planning-conflict": "spec",
   "bug-unlocated": "spec",
   "branch-moved": "spec",
@@ -146,6 +149,14 @@ export const EXTERNAL_ERROR_PATTERNS = [
   "docker build of .+ failed",
   // GNU timeout's exit: the gate's setup (installing dependencies, pulling images) ran out of time on the network
   "gate setup failed \\(exit 124\\)",
+  "premature close",
+  "socket disconnected",
+  "secure tls connection",
+  "resume attempts made no progress",
+  // `.` stands in for the quote in `unable to access 'https://…'` so the pattern is the same in JS and Postgres
+  "unable to access .https?://",
+  "ssl",
+  "connection timed out|connection refused",
 ] as const;
 
 const EXTERNAL = EXTERNAL_ERROR_PATTERNS.map(
@@ -242,5 +253,7 @@ export const HUMAN_ACTIONS = [
   "handback",
   "edit-refs",
   "request-changes",
+  "continue-baseline",
+  "recheck-baseline",
 ] as const;
 export type HumanAction = (typeof HUMAN_ACTIONS)[number];

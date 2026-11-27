@@ -20,6 +20,7 @@
 修订：2026-11-16 结构化输出不合格时先规范化、再修格式，不重跑阶段；Run 记 `resultFix`。
 修订：2026-11-20 票的阶段也有 `/context/tickets.md`；票级 Spec 轴把需求的全局规则当对照物，别票模块里的缺口不判 mustFix。
 修订：2026-11-20 连不上 Cursor 记成外部服务；外部失败的票阶段和收尾步骤重排时等 10、30 秒。
+修订：2026-11-27 agent Run 可写挂一个每 Run 专用的空 `/afk-out`；异常退出时 worker 可按结果文件收下。
 
 ## 背景与目标
 
@@ -79,7 +80,7 @@ flowchart LR
     end
     subgraph L3["执行层（无人值守）"]
         worker["Worker<br/>渲染上下文、起沙箱<br/>门禁、合并、推分支"]
-        sandbox["沙箱<br/>Sandcastle + Docker<br/>跑 Cursor Agent CLI<br/>只读 /context，只写代码和 commit<br/>不连平台、无 git 凭据"]
+        sandbox["沙箱<br/>Sandcastle + Docker<br/>跑 Cursor Agent CLI<br/>只读 /context，外加每 Run 专用空 /afk-out<br/>只写代码和 commit<br/>不连平台、无 git 凭据"]
         worker --> sandbox
     end
     host["代码托管<br/>GitHub / GitLab CE<br/>PR、CI、评论<br/>人在这里合并"]
@@ -183,7 +184,7 @@ flowchart TB
         prompts["prompts/<br/>overlay.md + 各阶段薄 prompt<br/>票级 review 默认 Spec 轴；final-review 两轴"]
         hostpkg["代码托管适配器 · @afk/host<br/>GitHub App installation token<br/>开 PR、读 PR 状态、关 PR、删分支"]
         subgraph box["Docker 沙箱 · Sandcastle 0.12.0"]
-            agent["Cursor Agent CLI<br/>workspace 读写<br/>/context、/refs、skills 只读<br/>不连平台、无 git 凭据"]
+            agent["Cursor Agent CLI<br/>workspace 读写<br/>/context、/refs、skills 只读，外加每 Run 专用空 /afk-out<br/>不连平台、无 git 凭据"]
         end
         env["联调环境<br/>compose 项目 afk-run-id<br/>各仓库快照 docker build、seed"]
     end
@@ -757,7 +758,7 @@ flowchart LR
 - **幂等键**：每个阶段的幂等键是 `(ticket, 内容版本, 阶段, 序号)`。重跑时先查这个阶段有没有已记录的结果，有就跳过。合并阶段额外检查：agent 分支的 head 已经是集成分支的祖先，就当作已合并。
 - **能力标签**：作业声明需要的能力（docker、能访问哪些仓库），worker 只拉自己能做的。
 - **互斥键**：作业可带 `lock_key`，领取时 API 排除“同键已有未过期租约”的作业，持有期等于租约期，过期自动释放。僵尸 worker 的防护：推送集成分支前先调 API 校验 (作业号, attempt) 仍是当前持有者并续期；推送本身用 `--force-with-lease`；若僵尸抢先推送成功，新持有者靠“agent 分支的 head 已是集成分支的祖先”的幂等检查当作已合并。校验和推送之间有一个很窄的时间窗，由后两层兜住。
-- **作业失败**：worker 自己跑不下去（沙箱起不来、推送一再被拒、门禁的 setup 失败）时报作业失败，同一阶段重排，三次都失败票才以 `job-failed` 等人处理。失败来源是外部服务（含连不上 Cursor：`Failed to reach the Cursor API`）时，重排的新作业带 `not_before`：第 1 次失败后等 10 秒，第 2 次后等 30 秒；第 3 次照旧卡住。等待和 4.6 推送原地重试的 10、30、90 秒同一套；作业重排没有 90 秒这一档，因为第三次不再跑。平台自己的失败仍立即重排。票的阶段和收尾步骤一样。额度、鉴权、OOM、门禁配置无效、推送被拒仍第一次就卡住。例外是 agent 的提供方拒绝一切工作（额度用完、密钥被拒，见 `isAgentProviderUnavailable`）：这次 Run 以 `provider-unavailable` 结束并和作业脱钩，作业原样回到队列，平台暂停所有 `agent-run` 作业（instance 表的 `agents_paused_at`），发一次通知，页面顶部显示原因和「恢复」按钮（也可以 `plat agents resume`）。额度用完的暂停会自己探活：15 分钟后放出一个 agent 作业（`agents_probe_at`，此时没有 agent 作业在跑），没成功就把间隔翻倍（30、60 分钟，最长 1 小时）；探活作业交回结果就自动恢复，写系统事件 `agents-resumed`（`automatic: true`）并通知。密钥被拒的暂停不探活，只等人恢复。暂停期间门禁、合并照常领取；票不进 blocked，也不计失败次数。度量页按周（按恢复的那天）列出 agent 暂停：每次暂停多久、是自动恢复还是人恢复的。
+- **作业失败**：worker 自己跑不下去（沙箱起不来、推送一再被拒、门禁的 setup 失败）时报作业失败，同一阶段重排。外部服务失败（含 Cursor 断线：Premature close、socket disconnected、TLS、resume 没有进展；访问代码托管失败：unable to access、SSL、连接超时或被拒；以及连不上 Cursor：`Failed to reach the Cursor API`）和平台失败分开从 `job_floor` 计数：外部服务失败按 30 秒、2 分钟、5 分钟、10 分钟退避重排，第 5 次才以 `job-failed` 卡住（来源外部服务）；平台失败仍三次卡住、立即重排。票的阶段和收尾的 agent 作业一样；final-e2e、host 作业、Locate 各自的规则不变。额度、鉴权、OOM、门禁配置无效、推送被拒仍第一次就卡住。例外是 agent 的提供方拒绝一切工作（额度用完、密钥被拒，见 `isAgentProviderUnavailable`）：这次 Run 以 `provider-unavailable` 结束并和作业脱钩，作业原样回到队列，平台暂停所有 `agent-run` 作业（instance 表的 `agents_paused_at`），发一次通知，页面顶部显示原因和「恢复」按钮（也可以 `plat agents resume`）。额度用完的暂停会自己探活：15 分钟后放出一个 agent 作业（`agents_probe_at`，此时没有 agent 作业在跑），没成功就把间隔翻倍（30、60 分钟，最长 1 小时）；探活作业交回结果就自动恢复，写系统事件 `agents-resumed`（`automatic: true`）并通知。密钥被拒的暂停不探活，只等人恢复。暂停期间门禁、合并照常领取；票不进 blocked，也不计失败次数。度量页按周（按恢复的那天）列出 agent 暂停：每次暂停多久、是自动恢复还是人恢复的。
 - **超时和缺结果**：agent 阶段（票的 implement、review 等，收尾的 final-review、final-fix 等；门禁、合并、e2e 除外）第一次 `timeout` 或 `invalid-output` 时，平台自己重跑一次同一阶段，留一条 Retry note，记一条来源为 scheduler 的事件（`data.autoRetry`）；第二次才卡住。额度记在票或收尾上（`auto_retried`），人 retry 后重新算（`stages/auto-retry.ts`）。度量的失败归因里，重跑之后还没走到别的阶段就又卡住的，只算那次要人处理；其余记作自动恢复。
 - 队列库用 graphile-worker、pg-boss，或者直接在 Postgres 表上自己实现都行，前提是满足上面的语义；选型时先确认租约续期和 attempt 是否可用。
 
@@ -778,6 +779,7 @@ flowchart LR
 
 中断恢复：
 
+- agent 阶段作业真的失败（没有被收下）时，失败的作业在释放槽之前把票分支取回主克隆，未提交改动存成 diff（`<AFK_HOME>/salvage/job-<作业号>-attempt-<次数>.diff`）。失败上报带上已取回的提交和有没有 diff。API 重排时给下一次 Run 留平台 Retry note（上次在第几分钟、因为什么中止、分支上已有哪些提交、未提交改动是否在 `/context/salvage.diff`，并提醒先核对验收测试）。下一次 Run 把上次的 diff 只读挂在 `/context/salvage.diff`（超过 1 MB 不放，说明写「太大，没有提供」）。平台不 apply、不提交这个 diff。重试领到哪个槽都从主克隆上已取回的提交接着做。
 - 中断发生在 agent 运行中，下一个作业回收这个僵尸槽位时按顺序做三件事：(1) 槽位里的 `agent/<ticket-id>` 比主 clone 多出 commit 时，先按「Git 操作规范」的取回规则取回（保留 commits）；(2) 把槽位里 `.sandcastle/worktrees/<分支名里的 / 换成 ->/` 的未提交改动存成 diff 文件，放在 worker 的 `<AFK_HOME>/salvage/job-<作业号>-attempt-<次数>.diff`（不写进运行日志；取不回 commits 的槽位 clone 也整个挪到 `salvage/clone-*`，不删）；(3) 整个槽位删掉重建。在这三步之前，先删掉仍然挂着这个槽位目录的沙箱容器：被 `SIGKILL` 的 worker 不会清理自己的沙箱，容器还在往旧目录写，重建出来的同名目录也挂不进新容器（M1 演练实测：docker 报 `error while creating mount source path`）。取回的 commits 留在 `agent/<ticket-id>` 上，implement 阶段重跑时 agent 看到的是带着它们的分支；agent 发现活已干完而没有新 commit 时，只要分支上已有 commit 就算 `done`（0 个 commit 且分支为空才是 `no-commits`），这些 commit 若还没有 `Run:` trailer，从分叉点起补上。这个阶段从头跑：新会话不知道半成品的意图，所以不接着用它。
 - 中断发生在门禁或合并：这两步没有副作用，直接重跑。集成分支只在门禁通过后前移，而且是用 `--force-with-lease` 一次完成的，所以不会出现“分支前移了，状态却没写回”的情况；就算真的出现，幂等检查也会把它识别成已合并。
 - 心跳被拒绝（API 回答 `"lost"`）时，worker 用 `AbortSignal` 立刻中止本地运行。连不上 API 时不放弃作业，等 API 回来再续租约、交结果。同一台机器上，槽位锁（见「Git 操作规范」）保证新旧进程不会同时用同一个槽位。Sandcastle 的 worktree 锁（ADR 0007）在 0.12.0 里没有发布，这把槽位锁取代它。领作业前按空闲槽位判断：锁还被活着的进程持有、且 API 认为它还持有这个作业，这个槽位就算被占；没有空闲槽位时不领要占槽的作业（host-sync 之类不占槽的照常领），免得新 worker 领到作业后又因为没有槽放手。SIGINT/SIGTERM 仍然立刻放弃手上的作业。
@@ -1173,7 +1175,8 @@ Cursor CLI 无头模式在 2026 年 2 月被报告不加载 skills，Cursor 于 
 | `/context/run.json`                | 阶段、基准提交（fixed point）、分支名、集成分支名、上限、`allowedProtectedPaths`（这张票已批准可以改的保护路径，没有则为空数组）                                                                                                                                                       | 总是                |
 | `/context/contract/<仓库名>/`      | 固定 SHA 上的契约文件，按提供契约的仓库分开                                                                                                                                                                                                                                            | 有契约边时          |
 | `/context/domain/`                 | 规划提交上规划仓库的 `GLOSSARY.md` 和 `docs/adr/`，只读                                                                                                                                                                                                                                | 非规划仓库的票      |
-| `/context/note.md`                 | 人对紧接着这一次 Run 的 Retry note                                                                                                                                                                                                                                                     | 这次重试带了说明    |
+| `/context/note.md`                 | 人对紧接着这一次 Run 的 Retry note；agent 阶段作业失败重排时是平台写的说明（上次做到哪、分支上已有的提交、未提交改动）                                                                                                                                                                 | 这次重试带了说明    |
+| `/context/salvage.diff`            | 上一次 agent 作业失败时没提交的改动，只读。超过 1 MB 不放，说明写在 note.md（「太大，没有提供」）。平台不 apply、不提交                                                                                                                                                                 | 作业失败重排且有 diff |
 | `/context/failure/gate.log`        | 上一次门禁失败命令输出的最后 200 行，加门禁结论；merge-fix 时是 `merge-tree` 的冲突说明或候选门禁的失败日志                                                                                                                                                                            | gate-fix、merge-fix |
 | `/context/review.json`             | review 的 mustFix 列表                                                                                                                                                                                                                                                                 | review-fix          |
 | `/context/recheck.json`            | Recheck 的范围：`fromSha`、`toSha`、`paths`。跟进 main 和 merge-fix 时 `fromSha` 是自动合并结果，沙箱里可以对它 `git diff`                                                                                                                                                             | recheck             |
@@ -1181,10 +1184,11 @@ Cursor CLI 无头模式在 2026 年 2 月被报告不加载 skills，Cursor 于 
 | `/refs/<仓库名>/`                  | 另一个仓库的只读快照（SHA：本需求有集成分支用它的 head，否则 main，由 API 每次运行定）                                                                                                                                                                                                 | 跨仓库参考时        |
 | `/home/agent/.cursor/skills/`      | skills，只读。源是 [mattpocock/skills](https://github.com/mattpocock/skills) 固定 commit（`SKILLS_SHA`）的 `skills/engineering` 目录；Run 上记下这个 SHA                                                                                                                               | 总是                |
 | `/home/agent/afk/check-result.mjs` | 交卷前自查命令，只读。worker 启动时用 esbuild 把各阶段结果 schema（含 refine 和规范化预处理）打成不依赖外部包的文件挂进来。用法：`node /home/agent/afk/check-result.mjs <阶段> <结果文件>`，阶段名是 `/context/run.json` 的阶段；通过退出码 0，不通过非 0 并逐条打印「字段路径：问题」 | 总是（agent 沙箱）  |
+| `/afk-out/`                        | 这次 agent Run 专用的空输出目录，可写挂到沙箱。agent 把结果 JSON 写成 `/afk-out/result.json`。宿主机目录在这次 Run 的 sandbox-logs 下，随 sandbox-logs 保留 14 天。门禁沙箱和结果修复 Run 不挂。worker 读这个文件时限制大小，只认通过该阶段 schema 的 JSON | 每次 agent Run      |
 
 skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自动发现位置），不再用 `/skills`。M0 实测：agent 不读文件就能列出挂进去的技能，按绝对路径读 `SKILL.md` 也能照做。prompt 里仍写明绝对路径作为兜底。
 
-**结构化输出**：每次 agent 运行用 Sandcastle 顶层 `run()` 的 `Output.object` 要求 agent 最后输出一段 `<result>` 标签包着的 JSON，Sandcastle 取最后一个标签并用 zod 校验。这样每次 agent 运行用 `run()`，门禁另起新沙箱用 `sandbox.exec`，因为 `Output.object` 只有顶层 `run()` 支持，`sandbox.run()` 没有。M0 实测三种 prompt（implement、fix、review）都稳定拿到合法 JSON。备选：由 worker 自己从 `stdout` 取最后一个 `<result>` 再用 zod 校验（M0 也实测可用），只在 Sandcastle 以后行为变化时启用。注意：prompt 里必须原样出现 `<result>`；cursor provider 下不能设 `maxRetries`。覆盖层要求 agent 先把结果写进 `/tmp/afk-result.json`，用 `node /home/agent/afk/check-result.mjs` 自查、改到通过，再输出同样的 `<result>`。自查走平台同一份 schema（含规范化）。`Output.object` 交给未经预处理的内层 schema，所以意思清楚的偏差会以 `StructuredOutputError` 出来。捕获之后先用同一套预处理再校验一次：通过则完成，Run 记 `resultFix: "normalized"`。还不通过就另起一次最多 3 分钟的修格式运行（新会话、默认模型、抛掉的 `result-repair/` 分支，不把工作区改动并回原分支），提示词只有这个阶段「结果」一节、原始文本和逐条校验错误；修好则用原来那次的 commits 完成，Run 记 `resultFix: "repaired"`，修格式的 token 用量加到这个 Run 上。没有 `<result>` 时（`rawMatched` 为空）拿最后一条 assistant 消息当原始文本。修不好才按现在的 `invalid-output`（自动重试一次，再不行叫人）。原样通过的 Run 不记 `resultFix`。票的流水线、需求收尾和跟进 main 之后的 Recheck 都走自查、规范化和修格式。
+**结构化输出**：每次 agent 运行用 Sandcastle 顶层 `run()` 的 `Output.object` 要求 agent 最后输出一段 `<result>` 标签包着的 JSON，Sandcastle 取最后一个标签并用 zod 校验。这样每次 agent 运行用 `run()`，门禁另起新沙箱用 `sandbox.exec`，因为 `Output.object` 只有顶层 `run()` 支持，`sandbox.run()` 没有。M0 实测三种 prompt（implement、fix、review）都稳定拿到合法 JSON。备选：由 worker 自己从 `stdout` 取最后一个 `<result>` 再用 zod 校验（M0 也实测可用），只在 Sandcastle 以后行为变化时启用。注意：prompt 里必须原样出现 `<result>`；cursor provider 下不能设 `maxRetries`。覆盖层要求 agent 先把结果写进 `/afk-out/result.json`，用 `node /home/agent/afk/check-result.mjs` 自查、改到通过，再输出同样的 `<result>`。自查走平台同一份 schema（含规范化）。`Output.object` 交给未经预处理的内层 schema，所以意思清楚的偏差会以 `StructuredOutputError` 出来。捕获之后先用同一套预处理再校验一次：通过则完成，Run 记 `resultFix: "normalized"`。还不通过就另起一次最多 3 分钟的修格式运行（新会话、默认模型、抛掉的 `result-repair/` 分支，不把工作区改动并回原分支），提示词只有这个阶段「结果」一节、原始文本和逐条校验错误；修好则用原来那次的 commits 完成，Run 记 `resultFix: "repaired"`，修格式的 token 用量加到这个 Run 上。没有 `<result>` 时（`rawMatched` 为空）拿最后一条 assistant 消息当原始文本。修不好才按现在的 `invalid-output`（自动重试一次，再不行叫人）。原样通过的 Run 不记 `resultFix`。票的流水线、需求收尾和跟进 main 之后的 Recheck 都走自查、规范化和修格式。
 
 | 运行                     | 字段                                                                                                                                                                                                                                                                                                                                    |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

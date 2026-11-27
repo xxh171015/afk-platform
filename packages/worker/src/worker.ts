@@ -15,7 +15,9 @@ import {
   tryParseRepoUrl,
 } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
+import { BASELINE_GATE_JOB, runBaselineGate } from "./baseline.ts";
 import { withCredentials } from "./credentials.ts";
+import { recutIntegrationBranch } from "./domain.ts";
 import {
   type ExecutorDeps,
   executeStage,
@@ -332,6 +334,58 @@ export async function processJob(
         return "abandoned";
       return "completed";
     }
+    if (job.type === BASELINE_GATE_JOB) {
+      const task = await api.baselineTask(job);
+      if (task === "lost") return "abandoned";
+      const deps = await withCredentials({ ...executor, api }, task.repo.url);
+      if (task.recut) {
+        if (!task.sha)
+          throw new InfrastructureError(
+            "recut requires the new integration-branch cut SHA",
+          );
+        const mainDir = await deps.repos.ensure(
+          task.repo.name,
+          task.repo.url,
+          task.repo.defaultBranch,
+        );
+        try {
+          await recutIntegrationBranch(
+            deps.repos,
+            deps.push,
+            mainDir,
+            {
+              repo: task.repo,
+              branch: task.recut.branch,
+              mainSha: task.sha,
+              ...(task.recut.planningSha
+                ? { planningSha: task.recut.planningSha }
+                : {}),
+            },
+            log,
+          );
+        } catch (error) {
+          throw new InfrastructureError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+      const body = await runBaselineGate(
+        {
+          ...deps,
+          records: {
+            findPassed: (tree, configBlob) =>
+              api.gateResult(job, { tree, configBlob }),
+          },
+        },
+        task,
+        log,
+        lost.signal,
+      );
+      if (lost.signal.aborted) return "abandoned";
+      if ((await handOver(options, job, body, log)) !== "held")
+        return "abandoned";
+      return "completed";
+    }
     if ((HOST_JOB_TYPES as readonly string[]).includes(job.type)) {
       if (!options.host)
         throw new InfrastructureError("this worker has no code host");
@@ -473,6 +527,7 @@ export async function processJob(
               ...(error.orphanRef && error.orphanSha
                 ? { orphanRef: error.orphanRef, orphanSha: error.orphanSha }
                 : {}),
+              ...(error.salvage ? { salvage: error.salvage } : {}),
             }
           : undefined,
         error instanceof InfrastructureError ? error.extraRuns : undefined,

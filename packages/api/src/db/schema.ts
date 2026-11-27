@@ -1,4 +1,5 @@
 import {
+  BASELINE_GATE_STATES,
   BLOCKED_REASONS,
   CHANGE_REQUEST_STATES,
   DISK_NOTICED,
@@ -232,6 +233,9 @@ export const specs = pgTable(
     planningDocsAtImport: jsonb("planning_docs_at_import")
       .notNull()
       .default({ status: "unknown" }),
+    // Baseline gate (GLOSSARY): pending while per-repo jobs are out, done when they all passed,
+    // waived when a person continues anyway. Null until confirm would start tickets.
+    baselineGateState: text("baseline_gate_state"),
     // Locate of a bug draft: pending while the job is out, found after it filled the original spec,
     // failed when a person has to retry or fill the source by hand. Null on specs that never located.
     locateState: text("locate_state"),
@@ -274,6 +278,10 @@ export const specs = pgTable(
     check(
       "specs_pause_reason_check",
       sql`(${t.state} = 'paused') = (${t.pauseReason} is not null) and (${t.pauseReason} is null or ${oneOf(t.pauseReason, PAUSE_REASONS)})`,
+    ),
+    check(
+      "specs_baseline_gate_state_check",
+      sql`${t.baselineGateState} is null or ${oneOf(t.baselineGateState, BASELINE_GATE_STATES)}`,
     ),
     check(
       "specs_locate_state_check",
@@ -855,6 +863,7 @@ export const runs = pgTable(
     tokenUsage: jsonb("token_usage"),
     // null: accepted as written. `normalized`: preprocess made it valid.
     // `repaired`: a throwaway format-repair run rewrote <result>.
+    // `recovered-after-exit`: the agent process died after a valid result.
     resultFix: text("result_fix"),
     result: text("result"),
     output: jsonb("output"),
@@ -914,8 +923,8 @@ export const gateResults = pgTable(
       .notNull()
       .references(() => repos.id),
     commitSha: text("commit_sha").notNull(),
-    // 'gate': the repo's own checks; 'e2e': an integration ticket's e2e in the integration environment. The same
-    // commit has one of each.
+    // 'gate': the repo's own checks; 'e2e': an integration ticket's e2e in the integration environment;
+    // 'baseline-gate': the cut before the first tickets. A baseline row must not stand in for a ticket gate.
     kind: text("kind").notNull().default("gate"),
     configSha: text("config_sha").notNull(),
     // What the result depends on: the tree gated and the gates.yaml blob it ran by. A pass is reused for the same pair.
@@ -935,7 +944,10 @@ export const gateResults = pgTable(
       t.kind,
     ),
     index("gate_results_tree_idx").on(t.repoId, t.treeSha, t.configBlob),
-    check("gate_results_kind_check", oneOf(t.kind, ["gate", "e2e"])),
+    check(
+      "gate_results_kind_check",
+      oneOf(t.kind, ["gate", "e2e", "baseline-gate"]),
+    ),
   ],
 );
 
