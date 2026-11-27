@@ -22,6 +22,7 @@ import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
 import { potentialConflictsOf } from "../host/trial-merge.ts";
 import { linksBySpec } from "../links/view.ts";
 import { specWastedAgentMs } from "../metrics/metrics.ts";
+import { baselineFailuresOf } from "../planning/baseline-gate.ts";
 import { recallGateTestCases } from "../stages/gate-records.ts";
 import {
   type IntegrationAttempt,
@@ -912,6 +913,7 @@ export async function specView(
       body: row.body as string,
       state: row.state as SpecState,
       pauseReason: (row.pause_reason as string | null) ?? null,
+      baselineFailures: await baselineFailuresOf(pool, specId),
       repos,
       refs: (
         (row.refs as { repoId: number; sha: string | null }[] | null) ?? []
@@ -1549,12 +1551,17 @@ export async function blockedQueue(
     cleanups: await cleanupProblems(pool),
     readyFailures: await readyFailures(pool),
     planning: await blockedPlanning(pool),
-    specs: specs.rows.map((s) => ({
-      id: s.id as number,
-      displayId: formatDisplayId("spec", s.id),
-      title: s.title as string,
-      reason: s.pause_reason as string,
-    })),
+    specs: await Promise.all(
+      specs.rows.map(async (s) => ({
+        id: s.id as number,
+        displayId: formatDisplayId("spec", s.id),
+        title: s.title as string,
+        reason: s.pause_reason as string,
+        ...(s.pause_reason === "baseline-gate-failed"
+          ? { baselineFailures: await baselineFailuresOf(pool, s.id as number) }
+          : {}),
+      })),
+    ),
     locates: (await failedLocates(pool)).map((item) => ({
       specId: item.specId,
       specDisplayId: item.specDisplayId,

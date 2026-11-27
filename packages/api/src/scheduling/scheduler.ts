@@ -25,6 +25,10 @@ import {
 import { enqueueHostSync } from "../host/host-jobs.ts";
 import { redAccessProblem } from "../host/repo-access.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
+import {
+  holdForBaselineGate,
+  isBaselineGatePending,
+} from "../planning/baseline-gate.ts";
 import { integrationBranch } from "../planning/integration-branches.ts";
 import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
 import { pinSha, SHA_RE, type SpecRefPin } from "../planning/spec-refs.ts";
@@ -323,7 +327,8 @@ export async function confirmSpec(
       await enqueuePlanningCommit(client, specId, { waived: leaveBehind });
     await recordAction(client, "confirm", { specId });
     const scheduled = await schedulePass(client, specId);
-    if (!scheduled.paused) await enqueueHostSync(client, project_id);
+    if (!scheduled.paused && !(await isBaselineGatePending(client, specId)))
+      await enqueueHostSync(client, project_id);
     return {
       status: "ok",
       state: scheduled.paused ? "paused" : running.state,
@@ -439,6 +444,9 @@ async function schedulingPass(
   // No ticket starts before the planning commit is there (ADR 0005).
   if (row.planning_state === "pending" || row.planning_state === "blocked")
     return none;
+  const baseline = await holdForBaselineGate(client, specId);
+  if (baseline === "waiting") return none;
+  if (baseline === "paused") return { enqueued: [], paused: true };
   if (await startFinalization(client, specId)) return none;
 
   // Concurrency is counted across the project's specs, so passes of different specs must not interleave

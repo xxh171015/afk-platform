@@ -4812,6 +4812,110 @@
         }
       }
     },
+    "/worker/jobs/{id}/baseline-task": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What a baseline-gate job has to do: run the repo's gate on the integration-branch cut SHA",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "repo": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["name", "url", "defaultBranch"]
+                    },
+                    "sha": {
+                      "type": "string"
+                    },
+                    "specId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["repo", "specId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or not a baseline-gate job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/worker/jobs/{id}/trial-merge-task": {
       "get": {
         "parameters": [
@@ -6687,6 +6791,50 @@
                         "pauseReason": {
                           "type": ["string", "null"]
                         },
+                        "baselineFailures": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repo": {
+                                "type": "string"
+                              },
+                              "reasons": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "failingTests": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "log": {
+                                "type": "string"
+                              },
+                              "run": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              }
+                            },
+                            "required": [
+                              "repo",
+                              "reasons",
+                              "failingTests",
+                              "run"
+                            ]
+                          }
+                        },
                         "repos": {
                           "type": "array",
                           "items": {
@@ -6900,6 +7048,7 @@
                         "body",
                         "state",
                         "pauseReason",
+                        "baselineFailures",
                         "repos",
                         "refs",
                         "integrationBranches",
@@ -9898,6 +10047,50 @@
                           "reason": {
                             "type": "string"
                           },
+                          "baselineFailures": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "repo": {
+                                  "type": "string"
+                                },
+                                "reasons": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "failingTests": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "log": {
+                                  "type": "string"
+                                },
+                                "run": {
+                                  "type": ["object", "null"],
+                                  "properties": {
+                                    "id": {
+                                      "type": "integer"
+                                    },
+                                    "displayId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["id", "displayId"]
+                                }
+                              },
+                              "required": [
+                                "repo",
+                                "reasons",
+                                "failingTests",
+                                "run"
+                              ]
+                            }
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -12151,6 +12344,84 @@
           },
           "409": {
             "description": "The spec is not paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/continue-baseline": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Running again although the baseline gate failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "planned",
+                        "running",
+                        "finalizing",
+                        "awaiting-review",
+                        "partially-merged",
+                        "reworking",
+                        "merged",
+                        "paused",
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not paused by baseline-gate-failed",
             "content": {
               "application/json": {
                 "schema": {

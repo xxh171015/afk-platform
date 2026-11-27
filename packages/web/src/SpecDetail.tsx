@@ -10,6 +10,7 @@ import {
   RowsSkeleton,
   StaleNotice,
 } from "./components/afk/states.tsx";
+import { Button } from "./components/ui/button.tsx";
 import { hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { specTypeLabel } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
@@ -90,6 +91,20 @@ export function SpecDetail({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["spec", specId] });
       void queryClient.invalidateQueries({ queryKey: ["specs"] });
+    },
+  });
+  const continueBaseline = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.POST("/specs/{id}/continue-baseline", {
+        params: { path: { id: specId } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["spec", specId] });
+      void queryClient.invalidateQueries({ queryKey: ["specs"] });
+      void queryClient.invalidateQueries({ queryKey: ["blocked"] });
     },
   });
 
@@ -239,8 +254,46 @@ export function SpecDetail({
               前往待处理
             </a>
           ) : null}
+          {spec.pauseReason === "baseline-gate-failed" ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={continueBaseline.isPending}
+              onClick={() => continueBaseline.mutate()}
+            >
+              不管它继续
+            </Button>
+          ) : null}
         </div>
       ) : null}
+      {spec.pauseReason === "baseline-gate-failed"
+        ? (spec.baselineFailures ?? []).map((failure) => (
+            <p
+              key={failure.repo}
+              className="mb-3 text-sm text-muted-foreground"
+              data-testid={`baseline-failure-${failure.repo}`}
+            >
+              {failure.repo}
+              {failure.reasons.length > 0
+                ? `：${failure.reasons.join("; ")}`
+                : ""}
+              {failure.failingTests.length > 0
+                ? ` · ${failure.failingTests.join(", ")}`
+                : ""}
+              {failure.run ? (
+                <>
+                  {" "}
+                  <a
+                    href={paths.run(failure.run.id)}
+                    className="text-primary underline"
+                  >
+                    {failure.run.displayId}
+                  </a>
+                </>
+              ) : null}
+            </p>
+          ))
+        : null}
 
       <ol
         aria-label="需求流程"

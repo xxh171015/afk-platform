@@ -330,7 +330,10 @@ export {
 } from "./schemas.ts";
 export { SKILLS_PACKAGE } from "./skills-package.ts";
 export { SKILLS_SHA } from "./skills-sha.ts";
+export type { BaselineGateState } from "./slotless-jobs.ts";
 export {
+  BASELINE_GATE_JOB,
+  BASELINE_GATE_STATES,
   occupiesSlot,
   READINESS_GATE_JOB,
   SLOTLESS_JOB_TYPES,

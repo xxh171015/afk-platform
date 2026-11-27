@@ -16,6 +16,7 @@ describe("failure source of a reason code", () => {
     expect(failureSourceOf("merge-conflict")).toBe("spec");
     expect(failureSourceOf("integration-environment-failed")).toBe("spec");
     expect(failureSourceOf("update-branch-gate-failed")).toBe("spec");
+    expect(failureSourceOf("baseline-gate-failed")).toBe("spec");
     expect(failureSourceOf("planning-conflict")).toBe("spec");
     expect(failureSourceOf("bug-unlocated")).toBe("spec");
     expect(failureSourceOf("branch-moved")).toBe("spec");
@@ -58,6 +59,7 @@ describe("pause reason labels", () => {
     );
     expect(pauseReasonLabel(null)).toBe("已暂停");
     expect(pauseReasonLabel("mystery")).toBe("mystery");
+    expect(pauseReasonLabel("baseline-gate-failed")).toBe("基线门禁失败");
     expect(PAUSE_REASONS.map(pauseReasonLabel)).toEqual([
       "agent 时间用完",
       "合 main 有冲突",
@@ -66,6 +68,7 @@ describe("pause reason labels", () => {
       "作业失败",
       "删了测试，等人批准",
       "Recheck 不是 pass，等人批准",
+      "基线门禁失败",
     ]);
   });
 });
