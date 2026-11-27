@@ -60,4 +60,28 @@ describe("running a baseline gate on a cut SHA", () => {
     expect(result.gate?.commitSha).toBe(sha);
     expect(result.gate?.treeSha).toMatch(/^[0-9a-f]{40}$/);
   });
+
+  it("opens the gate sandbox next to the stored clone so the container can follow gitdir", async () => {
+    const repo = origin();
+    const sha = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const root = mkdtempSync(join(tmpdir(), "afk-repos-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    let sandboxDir = "";
+    await runBaselineGate(
+      {
+        repos: new RepoStore(root),
+        makeGateSandbox: (dir) => {
+          sandboxDir = dir;
+          return new FakeGateSandbox(dir);
+        },
+      },
+      {
+        repo: { name: "backend", url: repo.dir, defaultBranch: "main" },
+        sha,
+        specId: 1,
+      },
+      () => {},
+    );
+    expect(sandboxDir.startsWith(root)).toBe(true);
+  });
 });
