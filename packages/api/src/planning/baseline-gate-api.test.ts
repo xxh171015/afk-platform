@@ -639,6 +639,26 @@ describe("baseline gate recheck", () => {
     ]);
   });
 
+  it("requeues a failed recut baseline-gate job still as a recut of the new cut", async () => {
+    const { specId, worker } = await pauseOnBaselineFail();
+    await db.pool.query("UPDATE repos SET default_sha = $1", [NEW_CUT]);
+    await call("POST", `/specs/${specId}/recheck-baseline`);
+    const claimed = await worker.claim({ takeSlot: false });
+    const job = claimed.body.job;
+    expect(job?.type).toBe("baseline-gate");
+    if (!job) throw new Error("no baseline-gate job");
+    await worker.fail(job.id, job.attempt, "could not recut");
+    const queued = (await baselineJobs()).filter(
+      (row) => row.state === "queued",
+    );
+    expect(queued.at(-1)?.payload).toMatchObject({
+      specId,
+      repoId: 1,
+      sha: NEW_CUT,
+      recut: true,
+    });
+  });
+
   it("refuses recheck-baseline unless the spec is paused by baseline-gate-failed", async () => {
     const { specId } = await draftSpec({ cutSha: CUT });
     expect(

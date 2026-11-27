@@ -515,7 +515,13 @@ export async function baselineGateFailed(
         )
       ).rows[0]?.default_sha;
     if (typeof sha === "string" && SHA_RE.test(sha))
-      await enqueueBaselineGate(client, payload.specId, payload.repoId, sha);
+      await enqueueBaselineGate(
+        client,
+        payload.specId,
+        payload.repoId,
+        sha,
+        payload.recut === true,
+      );
     return "requeued";
   }
   await pauseForBaseline(client, payload.specId);
