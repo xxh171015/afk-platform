@@ -86,7 +86,7 @@
 - 待审「返工中」= reworking，或 finalizing 且事件表里曾经 to_state=awaiting-review。第一次收尾不进待审、不进早报。
 - 提交修改要求时：锁住需求、草稿改 submitted、有意见的仓库排 rework、所有开着的 PR 转草稿、停自动合并、删除该需求的 final e2e 行、排汇总评论。在 awaiting-review 追加时同样删除 final e2e 行。
 - Rework 分支名为 agent 下的 `S-<n>-rework-<k>`，每次修改要求新名字。保护路径无票级豁免。意见要求改保护路径或删测试名 → declined + conflict，不 cannot-proceed。
-- GitHub App 增加 Issues 写，汇总评论走 issue comments，按 HTML 标记更新同一条；不改用 Pull Request Reviews API。接入检查把 Issues 写列入必需权限。GitLab 用 MR notes。换 token 时 review-note 只申请 Issues 写。
+- GitHub App 增加 Issues 写，汇总评论走 issue comments，按 HTML 标记更新同一条；不改用 Pull Request Reviews API。接入检查把 Issues 写列入必需权限。GitLab 用 MR notes。换 token 时 review-note 申请 Issues 写和 Pull requests 写（只申请 Issues 写时 GitHub App 不能在 PR 上发 issue comment）。
 - 自动合并预告在平台已提交人审意见数大于 0 时否决，以后也不再自动合并。worker 合并前重读 PR。
 - pull_requests 在 head SHA、与默认分支冲突、humanComments 变化时写事件（与现有 draft/ci/review 同一套路）。审查相关表同样由触发器写事件。host-sync 作业本身仍不记事件。
 - worker 多一个只领不占槽位作业的循环，避免槽位被 agent 占满时审查版本算不出来。

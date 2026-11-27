@@ -66,7 +66,7 @@ GLOSSARY 里「review 意见」一条补一句：人审意见不是 review 意�
 
 **本轮 grilling 补上（2026-11-26）：**
 
-- GitHub App 加 Issues: write。汇总评论走 issue comments，不走 Pull Request Reviews API。`design.md` 里「不给 Issues」作废；`TokenPermissions` 和接入检查的 `NEEDED` 都加上。GitLab 仍用 MR notes。
+- GitHub App 加 Issues: write。汇总评论走 issue comments，不走 Pull Request Reviews API。`design.md` 里「不给 Issues」作废；`TokenPermissions` 和接入检查的 `NEEDED` 都加上。GitLab 仍用 MR notes。#377 实测：GitHub App 只申请 `issues: write` 时，对 PR 发 `POST /issues/{n}/comments` 返回 403 `Resource not accessible by integration`；同一安装再加上 `pull_requests: write` 才 201。`review-note` 换 token 时两项都申请。接入检查仍把 Issues 写列为必需（App 本来就有 Pull requests 写）。
 - `pull_requests` 触发器在 `head_sha`、`conflicts_with_default`、`human_comments` 变化时写事件（类型分别是 `pull-request-head`、`pull-request-conflicts`、`pull-request-human-comments`，和现有 draft/ci/review 同一套路）。审查页横幅靠这次 SSE 失效，不自动换版本。host-sync 作业本身仍然不记事件。
 - 工作台「等你验收」不再列出每条需求，改成摘要 + 链到 `/review`。飞书 / 通知「可以来验收了」的 path 是 `/specs/{id}/review`。
 - GitHub App 的 `issues: write` 进 `checkAppAccess` 的 `NEEDED`：缺了就 `missing-permissions`，挡确认，和缺 Contents 写一样。T12 合入、重启 running 平台之前，先在 GitHub 设置里把 Issues 改成 Read and write。
@@ -364,7 +364,7 @@ upsertPlatformComment(input: { repo: RepoRef; number: number; marker: string; bo
 
 GitHub 用 issue comments 接口，GitLab 用 MR notes 接口。标记是 `<!-- afk:review-notes -->`，一个 PR 一条。提交修改要求时写入意见清单（标「处理中」），Rework 结束后改成逐条结果。失败隔 60 秒重试，三次为止；不挡流程，审查页显示「PR 上的汇总评论没写上」和原因。
 
-GitHub App **加上 Issues: write**（`TokenPermissions` 增加 `issues`，`checkAppAccess` 的 `NEEDED` 加上 `issues: write`；`review-note` 换 token 时只申请 `issues: write`）。不改用 Pull Request Reviews API：那会留下一条 bot review，和「一条普通汇总评论」不同，也可能把 PR 的 `review` 状态改成 commented。`design.md` / 操作手册里「不给 Issues」改成给 Issues 写，其余仍不给（Workflows、Administration、Actions 写、Secrets）。本机 GitHub App 要在 T12 合入、重启 running 平台之前，在 GitHub 设置里把 Issues 改成 Read and write。演练确认能写、能按标记更新、不重复。GitLab 的 Developer + MR notes 够用，权限不用改。
+GitHub App **加上 Issues: write**（`TokenPermissions` 增加 `issues`，`checkAppAccess` 的 `NEEDED` 加上 `issues: write`）。不改用 Pull Request Reviews API：那会留下一条 bot review，和「一条普通汇总评论」不同，也可能把 PR 的 `review` 状态改成 commented。`review-note` 换 token 时申请 `{ issues: "write", pull_requests: "write" }`：#377 在 PR 379 上证实只申请 Issues 写会 403，GitHub App 对 PR 的 issue comments 还要 Pull requests 写。`design.md` / 操作手册里「不给 Issues」改成给 Issues 写，其余仍不给（Workflows、Administration、Actions 写、Secrets）。本机 GitHub App 要在 T12 合入、重启 running 平台之前，在 GitHub 设置里把 Issues 改成 Read and write。演练确认能写、能按标记更新、不重复。GitLab 的 Developer + MR notes 够用，权限不用改。
 
 ### 8.7 自动合并
 
@@ -397,17 +397,28 @@ GitHub App **加上 Issues: write**（`TokenPermissions` 增加 `issues`，`chec
 
 ## 11. 性能目标
 
-下面是要实测的目标，不是已经达到的指标。实现时在 Mac 上用一个典型 PR（约 30 个文件、1000 行改动）和一个大 PR（约 300 个文件、2 万行）各量一次，把冷启动、worker 排队、git 计算、传输、渲染分开记，结果写回本文档：
+目标仍是下表。2026-11-27 在本机 running 平台（commit `0d80d20`，API :3000，Vite :5173，`AFK_SLOTS=4`）按第 14 节演练实测，全部达标。控制塔是 Vite 开发模式：下面「页面」是 Chrome headless、源文件已在 HTTP 缓存时，从导航到正文出现的时间。真正的进程冷启动还会再拉约 200 个 Vite 模块，那不代表生产打包。接口时间是 `GET` 自己；排队是作业 `queued → running`。
 
-| 场景                                               | 目标                           |
-| -------------------------------------------------- | ------------------------------ |
-| 审查版本已算好，打开审查页到文件树和第一个文件出来 | 1 秒内                         |
-| 已加载的版本里切换文件、展开上下文                 | 200ms 内                       |
-| 待审列表打开                                       | 1 秒内（20 个需求以内）        |
-| 导读打开（版本已算好）                             | 1 秒内                         |
-| `review-revision` 在 worker 上的计算（不含排队）   | 典型 PR 10 秒内，大 PR 60 秒内 |
+| 场景                                               | 目标                           | 实测 |
+| -------------------------------------------------- | ------------------------------ | ---- |
+| 审查版本已算好，打开审查页到文件树和第一个文件出来 | 1 秒内                         | 300–304ms（S-65，版本 ready，3 个文件；Vite HTML `load` ~120ms，随后 `GET /specs/65/review` 10–23ms + revision 5–11ms + `review-files` 2ms） |
+| 已加载的版本里切换文件、展开上下文                 | 200ms 内                       | 点第二个文件到 `GET /review-files/22` 回来 25ms（接口 5ms）；点「向下展开 20 行」到 `GET /review-blobs` 回来 23ms（接口 6ms） |
+| 待审列表打开                                       | 1 秒内（20 个需求以内）        | 204ms 到「审到一半」出现（当时 3 个需求）；`GET /review-queue` 12–48ms |
+| 导读打开（版本已算好）                             | 1 秒内                         | 271ms 到「修改要求」；`GET /review-revisions/6/guide` 2–5ms |
+| `review-revision` 在 worker 上的计算（不含排队）   | 典型 PR 10 秒内，大 PR 60 秒内 | 见下 |
 
-托管任务和 agent 运行共用 worker 的领取循环：循环数等于沙箱槽位数（`packages/worker/src/worker.ts:172`），每个循环一次只做一个作业。槽位全被 agent 运行占着时，托管任务（现在的 host-sync 也一样）要等某个运行结束才有循环去领。`review-revision` 本身不占槽位（加进 `packages/shared/src/slotless-jobs.ts` 的列表），但人打开审查页时如果正好两个需求在跑，要等几十分钟，1 秒的目标就达不到。所以 T4 给 worker 多开一个循环，它只领不占槽位的作业（`claim(false)`），槽位满时托管任务和 `review-revision` 也有人领。实测时记下排队时间。
+`computeReviewRevision` 在本机对已 fetch 的仓库直算（不含 worker clone/fetch）：
+
+| 样本 | 规模 | 计算 |
+| ---- | ---- | ---- |
+| 典型：`5e3d9fa7`（#368 审查版本那笔）相对 `origin/main` | 30 文件 +3208 / −24 | 936ms |
+| 大：PR 378 `0d80d20` 相对 `origin/main` | 156 文件 +23737 / −218（目标约 300 文件 / 2 万行：行数够，文件数约一半） | 4553ms |
+
+演练自己的 PR 只有 2–3 个 stamp 文件。worker 上那几次 `review-revision` 作业（含取仓库）run 0.76–4.50s，`ready_at − created_at` 0.85–5.22s。
+
+托管任务和 agent 运行共用 worker 的领取循环：循环数等于沙箱槽位数（`packages/worker/src/worker.ts:172`），每个循环一次只做一个作业。槽位全被 agent 运行占着时，托管任务（现在的 host-sync 也一样）要等某个运行结束才有循环去领。`review-revision` 本身不占槽位（加进 `packages/shared/src/slotless-jobs.ts` 的列表），但人打开审查页时如果正好两个需求在跑，要等几十分钟，1 秒的目标就达不到。所以 T4 给 worker 多开一个循环，它只领不占槽位的作业（`claim(false)`），槽位满时托管任务和 `review-revision` 也有人领。
+
+实测排队：GitLab 作业 5609、5613 在 1–2 个 `agent-run` 占着槽位时仍被领走并完成。排队 81ms–1.44s，落在 worker 默认 `pollMs` 2s 之内。这段窗口没有 `host-sync` 作业（host-sync 在 API 进程里跑）。演练给 GitLab 空提交换 head 之后，打开审查页现排作业 5613，排队 1.07s。
 
 ## 12. 为什么这些不做
 
@@ -503,7 +514,7 @@ GitHub App **加上 Issues: write**（`TokenPermissions` 增加 `issues`，`chec
 
 **接入与事件**
 
-- GitHub 仓库缺少 Issues 写时，`checkAppAccess` 返回 `missing-permissions`（含 `issues: write`），和缺 Contents 写一样挡确认。`review-note` 换 token 只申请 `issues: write`。
+- GitHub 仓库缺少 Issues 写时，`checkAppAccess` 返回 `missing-permissions`（含 `issues: write`），和缺 Contents 写一样挡确认。`review-note` 换 token 申请 `{ issues: "write", pull_requests: "write" }`（只申请 Issues 写时 GitHub App 不能在 PR 上发 issue comment）。
 - 只改 `pull_requests.head_sha`（或冲突、评论数）会写对应事件，SSE 连着时审查页出现切换横幅、待审列表更新冲突/评论数。只改 `synced_at` 仍不写事件。
 
 **安全**
@@ -516,6 +527,12 @@ GitHub App **加上 Issues: write**（`TokenPermissions` 增加 `issues`，`chec
 2. **GitLab**：自建 GitLab CE 17.3.1 上的试点仓库，同样走一遍：MR 的审查版本和 GitLab 页面上的 diff 一致，MR 能转草稿和转回，MR notes 上的汇总评论能写、能更新、不重复。记下 GitLab 上 `humanComments` 不计令牌本人的行为。
 
 两次演练都按第 11 节测量，结果写回本文档。
+
+**演练结果（2026-11-27，不要把演练 PR 合进默认分支）**
+
+GitHub（平台仓库 `xxh171015/afk-platform`，项目 4，`mergePolicy=auto-improvement`）：S-65 improvement，T-182 / T-183，PR [#379](https://github.com/xxh171015/afk-platform/pull/379)，分支 `spec/ba6752/review-drill-gh-377`。接入检查在给 App 加上 Issues 写并重启后为 `ok`（2026-11-26T23:34:11Z）。从待审进入，按导读看完。C-3 写在审查版本 4（改 `biome.json`，预期 declined），C-4 写在版本 5（新增 `docs/canary/review-drill-gh-note.txt`）；提交时带 `acknowledgeStale`。Rework 后 C-3 `declined`、C-4 `addressed`，修改要求 #1 `done`，需求回到 awaiting-review。验收包有「人审意见」和两条 `needs-human`（保护路径那条）；导读有「修改要求 #1」和逐条处理结果。待审：提交后进返工中，回来后在「审到一半」（新版本已看 0/3）。自动合并：提交前 `willMerge: true`；回来后 `不会自动合并：平台上有人审意见`。汇总评论：只申请 `issues: write` 时作业 5633–5640 全部 403；补上 `pull_requests: write` 后作业 5641 把评论 `7206683845` upsert 成最终正文，5642 再 PATCH 同一 id，PR 上始终一条、标记 `<!-- afk:review-notes -->`，`humanComments` 仍为 0（bot）。不要合并 #379。
+
+GitLab（自建 CE 17.3.1，`enterprise: false`，试点 `xuxinghua/afk-pilot-backend`，项目 3，合并策略 manual）：S-66，T-184 / T-185，[MR !6](https://gitlab.zs.shaipower.online/xuxinghua/afk-pilot-backend/-/merge_requests/6)。审查版本 2 个 stamp 文件，和 MR diff 一致。C-1 要求改 `.sandcastle/gates.yaml`（declined + conflict）；C-2 要求在 stamp 文件加第二行，Rework 因票/规格「只含 stamp 一行」也 declined——能改成功的那条由 GitHub C-4 覆盖。MR 用标题 `Draft:` 转草稿；第一次 `pr-ready` 409，60 秒后重试去掉前缀成功，`draft=false`。汇总 note `101601`：创建时「处理中」，收尾后更新为两条没处理，没有第二条平台 note。另有一条令牌本人 note `101598`（演练用）；`humanComments` 保持 0：实现排除 system note、bot，以及令牌用户名 `xuxinghua`（平台 note 也是这个用户）。待审：等你审 →（看完）看完待合并 →（提交）返工中 → 回来后看完待合并，标签含「待人定」「人审意见未处理」。不要合并 !6。
 
 ## 附：Linear 是怎么做的
 
