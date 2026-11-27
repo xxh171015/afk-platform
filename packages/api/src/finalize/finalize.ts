@@ -344,9 +344,9 @@ export async function markFinalClaimed(
     `INSERT INTO runs (spec_id, repo_id, job_id, stage, attempt, retry_note, started_at)
      SELECT $1, $2, $3, $4,
        (SELECT count(*) FROM runs r WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = $4) + 1,
-       COALESCE(
+       NULLIF(CONCAT_WS(chr(10) || chr(10),
          (SELECT f.retry_note FROM finalizations f WHERE f.spec_id = $1 AND f.repo_id = $2),
-         s.retry_note),
+         s.retry_note), ''),
        now()
      FROM specs s WHERE s.id = $1
      ON CONFLICT (job_id) DO NOTHING`,

@@ -355,9 +355,10 @@ export async function renderFor(
     ? await fetchContracts(deps.repos, bundle.contracts)
     : [];
   const integration = bundle.integrationBranch;
-  const salvageDiff = deps.salvageDir
-    ? readLatestSalvageDiff(deps.salvageDir, bundle.agentBranch)
-    : undefined;
+  const salvageDiff =
+    deps.salvageDir && !bundle.ticket?.restart
+      ? readLatestSalvageDiff(deps.salvageDir, bundle.agentBranch)
+      : undefined;
   renderContext({
     dir,
     bundle,

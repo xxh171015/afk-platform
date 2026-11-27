@@ -489,6 +489,21 @@ describe("renderContext", () => {
     expect(read(dir, "ticket.md")).toBe(bundle.ticket?.file);
   });
 
+  it("omits salvage.diff when the ticket restarts from the integration branch, even if the last uncommitted diff is given", () => {
+    const dir = ctxDir();
+    const base = bundleFor();
+    const ticket = base.ticket;
+    if (!ticket) throw new Error("expected a ticket on the bundle");
+    renderContext({
+      dir,
+      bundle: bundleFor({ ticket: { ...ticket, restart: true } }),
+      run,
+      salvageDiff: "diff --git a/src/dirty.ts b/src/dirty.ts\n+left behind\n",
+    });
+    expect(existsSync(join(dir, "note.md"))).toBe(false);
+    expect(existsSync(join(dir, "salvage.diff"))).toBe(false);
+  });
+
   it("writes salvage.diff when the last uncommitted diff is given, and omits it when it is over 1 MB", () => {
     const dir = ctxDir();
     const salvageDiff =

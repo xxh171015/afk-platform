@@ -166,7 +166,9 @@ export function renderContext(input: ContextInput): void {
   if (bundle.note) {
     writeFileSync(join(dir, "note.md"), bundle.note);
   }
+  // A restart drops the old branch; leftover salvage.diff would describe work that is gone.
   if (
+    !bundle.ticket?.restart &&
     input.salvageDiff !== undefined &&
     Buffer.byteLength(input.salvageDiff, "utf8") <= 1_000_000
   ) {

@@ -915,6 +915,23 @@ describe("a lease that ran out", () => {
     const again = (await claim()) as Claimed;
     expect(again).toMatchObject({ id: lost.id, attempt: lost.attempt + 1 });
   });
+
+  it("leaves a generic Retry note on the next implement Run after a lease ran out", async () => {
+    await runningSpec([ticket("a")]);
+    await loseLease();
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("implement");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("上次运行中断了");
+    expect(note).toContain("git log base..HEAD");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).not.toContain("第 1 分钟");
+  });
 });
 
 describe("a step of the overall review that could not be carried out", () => {
@@ -1224,5 +1241,95 @@ describe("a step of the overall review that could not be carried out", () => {
     expect(note).toContain("rename the helper");
     expect(note).toContain("/context/salvage.diff");
     expect(note).toContain("先核对验收测试");
+  });
+
+  it("leaves a generic Retry note on the next final-fix Run after a lease ran out", async () => {
+    await toFinalReview();
+    const review = (await claim()) as Claimed;
+    expect(review.payload.stage).toBe("final-review");
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", line: 1, problem: "rename" }],
+          suggestions: [],
+        },
+      },
+      findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
+    });
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("final-fix");
+    clock.advanceSeconds(121);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-fix");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("上次运行中断了");
+    expect(note).toContain("git log base..HEAD");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).not.toContain("第 1 分钟");
+  });
+
+  it("puts the platform Retry note before a person's note when they retry a job-failed wrap-up", async () => {
+    await toFinalReview();
+    const review = (await claim()) as Claimed;
+    expect(review.payload.stage).toBe("final-review");
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", line: 1, problem: "rename" }],
+          suggestions: [],
+        },
+      },
+      findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
+    });
+    const salvage = {
+      commits: [
+        {
+          sha: "def2222222222222222222222222222222222222",
+          subject: "rename the helper",
+        },
+      ],
+      hadDiff: true,
+      diffTooLarge: false,
+    };
+    for (let i = 0; i < 3; i++) {
+      const job = (await claim()) as Claimed;
+      expect(job.payload.stage).toBe("final-fix");
+      expect(
+        (
+          await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+            salvage,
+          })
+        ).status,
+      ).toBe(200);
+    }
+    const human = "take theirs on src/a.ts";
+    expect(
+      (await call("POST", "/specs/1/final/retry", { note: human })).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-fix");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("平台自动重试");
+    expect(note).toContain("rename the helper");
+    expect(note).toContain(human);
+    expect(note?.indexOf("平台自动重试") ?? -1).toBeLessThan(
+      note?.indexOf(human) ?? -1,
+    );
   });
 });

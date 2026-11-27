@@ -24,6 +24,10 @@ export type JobFailureSalvage = {
   diffTooLarge?: boolean;
 };
 
+// No live worker to retrieve from: the next Run is told to look at the branch and salvage.diff itself.
+export const LEASE_EXPIRED_RETRY_NOTE =
+  "上次运行中断了，分支上可能已有提交，先看 `git log base..HEAD` 和 `/context/salvage.diff`（有的话）。";
+
 export function jobFailureRetryNote(
   durationMs: number,
   error: string,
