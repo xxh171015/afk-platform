@@ -32,6 +32,7 @@ export const TIMELINE_KINDS = [
   "merged",
   "action",
   "auto-retry",
+  "recovered-after-exit",
 ] as const;
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number];
@@ -419,6 +420,25 @@ export async function specTimeline(
         at: row.at.toISOString(),
         text: `${what} ${row.stage ?? ""} ${why}，已自动重试一次`,
         ...(row.ticket_id ? { ticketId: row.ticket_id } : {}),
+      });
+    }
+    const recovered = await pool.query<{
+      at: Date;
+      ticket_id: number | null;
+      run_id: number | null;
+    }>(
+      `SELECT at, ticket_id, run_id FROM events
+       WHERE spec_id = $1 AND (data->>'recoveredAfterExit')::boolean
+       ORDER BY id`,
+      [specId],
+    );
+    for (const row of recovered.rows) {
+      items.push({
+        kind: "recovered-after-exit",
+        at: row.at.toISOString(),
+        text: "agent 进程异常退出，平台按它已写好的结果收下",
+        ...(row.ticket_id ? { ticketId: row.ticket_id } : {}),
+        ...(row.run_id ? { runId: row.run_id } : {}),
       });
     }
   } else if (spec.state === "paused") {

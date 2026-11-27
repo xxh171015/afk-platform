@@ -2658,6 +2658,31 @@ describe("what a person sees", () => {
     ]);
   });
 
+  it("records recovered-after-exit on the Run and shows it on the timeline", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        resultFix: "recovered-after-exit",
+        output: { status: "done", error: "Error: Premature close" },
+      },
+    });
+    expect((await call("GET", "/runs/1")).body.resultFix).toBe(
+      "recovered-after-exit",
+    );
+    const spec = (await call("GET", `/specs/${specId}`)).body;
+    expect(spec.timeline).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "recovered-after-exit",
+          text: "agent 进程异常退出，平台按它已写好的结果收下",
+          ticketId: 1,
+          runId: 1,
+        }),
+      ]),
+    );
+  });
+
   it("totals token usage by stage on the spec, and leaves a run without a result line empty", async () => {
     const specId = await runningSpec([ticket("a")]);
     await stage("implement", {

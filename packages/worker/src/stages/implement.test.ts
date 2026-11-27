@@ -1,7 +1,19 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GENERATED_UPSTREAM_ENV, git, gitOrThrow, gitOut } from "@afk/pipeline";
+import {
+  AFK_OUT_RESULT_MAX_BYTES,
+  GENERATED_UPSTREAM_ENV,
+  git,
+  gitOrThrow,
+  gitOut,
+} from "@afk/pipeline";
 import {
   bundleFor,
   FakeAgentRunner,
@@ -13,7 +25,11 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import type { TicketAlign } from "../align-ticket-branch.ts";
 import type { ClaimedJob } from "../api.ts";
-import type { ExecutorDeps, StageOutcomeBody } from "../executor.ts";
+import {
+  type ExecutorDeps,
+  InfrastructureError,
+  type StageOutcomeBody,
+} from "../executor.ts";
 import { pushRef } from "../push.ts";
 import { RepoStore } from "../repos.ts";
 import type { Slot } from "../slots.ts";
@@ -88,18 +104,19 @@ function slot(ref: string): Slot {
 function context(
   bundle: ReturnType<typeof bundleFor>,
   payload: Record<string, unknown> = {},
+  logs?: string[],
 ): {
   job: ClaimedJob;
   bundle: ReturnType<typeof bundleFor>;
   signal: AbortSignal;
-  log: () => void;
+  log: (line: string) => void;
   logRaw: () => void;
 } {
   return {
     job: { ...job, payload },
     bundle,
     signal: new AbortController().signal,
-    log: () => {},
+    log: logs ? (line) => logs.push(line) : () => {},
     logRaw: () => {},
   };
 }
@@ -1066,5 +1083,484 @@ describe("result format repair", () => {
       0,
     );
     expect(runner.calls).toHaveLength(2);
+    expect(runner.calls[0]?.resultDir).toBe(
+      join(tmp, "sandbox-logs", "R-9", "afk-out"),
+    );
+    expect(runner.calls[1]?.resultDir).toBeUndefined();
+    expect(runner.calls[1]?.resultRepair).toBe(true);
+  });
+});
+
+const CRASH = { kind: "other" as const, message: "Error: Premature close" };
+const CANNOT_PROCEED = {
+  status: "cannot-proceed" as const,
+  blockedReason: "agent-gave-up" as const,
+  detail: "needs a human decision",
+};
+const TIDY_DONE = {
+  status: "done" as const,
+  summary: "tidied",
+  tidied: [] as number[],
+  skipped: [] as { index: number; reason: string }[],
+  decisions: [] as { kind: string; text: string }[],
+};
+
+function assistantLine(output: unknown): string {
+  return JSON.stringify({
+    type: "assistant",
+    message: {
+      content: `<result>\n${JSON.stringify(output)}\n</result>`,
+    },
+  });
+}
+
+function outputOf(stage: string) {
+  return stage === "final-tidy" ? TIDY_DONE : DONE;
+}
+
+const TICKET_STAGES = [
+  "implement",
+  "gate-fix",
+  "review-fix",
+  "merge-fix",
+] as const;
+const FINAL_CASES = [
+  { stage: "final-fix", branch: "agent/S-12-final" },
+  { stage: "final-tidy", branch: "agent/S-12-final" },
+  { stage: "update-branch", branch: "agent/S-12-update" },
+] as const;
+
+describe("recover after an abnormal agent exit", () => {
+  function ticketRemote() {
+    repo = makeRepo({ ".sandcastle/gates.yaml": GATES });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/T-123"]);
+    return gitOut(origin, ["rev-parse", "agent/T-123"]);
+  }
+
+  function finalRemote(branch: string) {
+    repo = makeRepo({ ".sandcastle/gates.yaml": GATES });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", branch]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", branch]);
+    return gitOut(origin, ["rev-parse", branch]);
+  }
+
+  it.each(TICKET_STAGES)(
+    "%s: an abnormal exit with a valid result file, commits, and a clean worktree is done with resultFix recovered-after-exit",
+    async (stage) => {
+      const remoteTip = ticketRemote();
+      const logs: string[] = [];
+      const runner = new FakeAgentRunner(slotDir, (ctx) => {
+        expect(readdirSync(ctx.resultDir as string)).toEqual([]);
+        return {
+          files: { "src/a.ts": "export {};\n" },
+          resultFile: DONE,
+          error: CRASH,
+        };
+      });
+      const outcome = await agentChange(
+        deps(runner),
+        context(
+          bundleFor({
+            stage,
+            agentBranch: "agent/T-123",
+            integrationBranch: "spec/s",
+          }),
+          {},
+          logs,
+        ),
+        repo.dir,
+        slot("agent/T-123"),
+        { expectedOld: remoteTip, remoteTip },
+      );
+      expect(outcome.outcome).toBe("done");
+      expect(outcome.run).toMatchObject({
+        resultFix: "recovered-after-exit",
+        output: expect.objectContaining({
+          status: "done",
+          error: CRASH.message,
+        }),
+      });
+      expect(logs).toContain("agent 进程异常退出，平台按它已写好的结果收下");
+      expect(git(origin, ["cat-file", "-e", "agent/T-123:src/a.ts"]).code).toBe(
+        0,
+      );
+      expect(runner.calls[0]?.resultDir).toBe(
+        join(tmp, "sandbox-logs", "R-9", "afk-out"),
+      );
+      expect(
+        existsSync(join(runner.calls[0]?.resultDir ?? "", "result.json")),
+      ).toBe(true);
+    },
+  );
+
+  it.each(TICKET_STAGES)(
+    "%s: an abnormal exit with a dirty worktree is a job failure",
+    async (stage) => {
+      const remoteTip = ticketRemote();
+      const runner = new FakeAgentRunner(slotDir, () => ({
+        files: { "src/a.ts": "export {};\n" },
+        uncommitted: { "src/dirty.ts": "left behind\n" },
+        resultFile: DONE,
+        error: CRASH,
+      }));
+      await expect(
+        agentChange(
+          deps(runner),
+          context(
+            bundleFor({
+              stage,
+              agentBranch: "agent/T-123",
+              integrationBranch: "spec/s",
+            }),
+          ),
+          repo.dir,
+          slot("agent/T-123"),
+          { expectedOld: remoteTip, remoteTip },
+        ),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+    },
+  );
+
+  it.each(FINAL_CASES)(
+    "$stage: an abnormal exit with a valid result file, commits, and a clean worktree is done with resultFix recovered-after-exit",
+    async ({ stage, branch }) => {
+      const remoteTip = finalRemote(branch);
+      const logs: string[] = [];
+      const runner = new FakeAgentRunner(slotDir, () => ({
+        files: { "src/a.ts": "export {};\n" },
+        resultFile: outputOf(stage),
+        error: CRASH,
+      }));
+      const outcome = await agentChange(
+        deps(runner),
+        context(
+          bundleFor({
+            stage,
+            ticket: null,
+            agentBranch: branch,
+            integrationBranch: "spec/s",
+          }),
+          {},
+          logs,
+        ),
+        repo.dir,
+        slot(branch),
+        { expectedOld: remoteTip, remoteTip },
+      );
+      expect(outcome.outcome).toBe("done");
+      expect(outcome.run).toMatchObject({
+        resultFix: "recovered-after-exit",
+        output: expect.objectContaining({
+          status: "done",
+          error: CRASH.message,
+        }),
+      });
+      expect(logs).toContain("agent 进程异常退出，平台按它已写好的结果收下");
+      expect(git(origin, ["cat-file", "-e", `${branch}:src/a.ts`]).code).toBe(
+        0,
+      );
+    },
+  );
+
+  it.each(FINAL_CASES)(
+    "$stage: an abnormal exit with a dirty worktree is a job failure",
+    async ({ stage, branch }) => {
+      const remoteTip = finalRemote(branch);
+      const runner = new FakeAgentRunner(slotDir, () => ({
+        files: { "src/a.ts": "export {};\n" },
+        uncommitted: { "src/dirty.ts": "left behind\n" },
+        resultFile: outputOf(stage),
+        error: CRASH,
+      }));
+      await expect(
+        agentChange(
+          deps(runner),
+          context(
+            bundleFor({
+              stage,
+              ticket: null,
+              agentBranch: branch,
+              integrationBranch: "spec/s",
+            }),
+          ),
+          repo.dir,
+          slot(branch),
+          { expectedOld: remoteTip, remoteTip },
+        ),
+      ).rejects.toBeInstanceOf(InfrastructureError);
+    },
+  );
+
+  it("reads <result> from the last assistant message when the result file is missing", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      rawLines: [assistantLine(DONE)],
+      error: CRASH,
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+    expect(outcome.outcome).toBe("done");
+    expect(outcome.run).toMatchObject({
+      resultFix: "recovered-after-exit",
+      output: expect.objectContaining({
+        status: "done",
+        error: CRASH.message,
+      }),
+    });
+  });
+
+  it("prefers the result file over the last assistant message", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      resultFile: DONE,
+      rawLines: [assistantLine(CANNOT_PROCEED)],
+      error: CRASH,
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+    expect(outcome.outcome).toBe("done");
+    expect(outcome.run).toMatchObject({
+      output: expect.objectContaining({ status: "done" }),
+    });
+  });
+
+  it("accepts cannot-proceed with blockedReason and detail after an abnormal exit", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      resultFile: CANNOT_PROCEED,
+      error: CRASH,
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+    expect(outcome.outcome).toBe("agent-gave-up");
+    expect(outcome.run).toMatchObject({
+      resultFix: "recovered-after-exit",
+      output: expect.objectContaining({
+        status: "cannot-proceed",
+        blockedReason: "agent-gave-up",
+        detail: "needs a human decision",
+        error: CRASH.message,
+      }),
+    });
+  });
+
+  it("treats done with no commits, including inherited, as a job failure rather than no-commits", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      resultFile: DONE,
+      error: CRASH,
+    }));
+    await expect(
+      agentChange(
+        deps(runner),
+        context(
+          bundleFor({
+            stage: "implement",
+            agentBranch: "agent/T-123",
+            integrationBranch: "spec/s",
+          }),
+        ),
+        repo.dir,
+        slot("agent/T-123"),
+        { expectedOld: remoteTip, remoteTip },
+      ),
+    ).rejects.toBeInstanceOf(InfrastructureError);
+  });
+
+  it("accepts done that added no new commits when the branch already had work", async () => {
+    repo = makeRepo({ ".sandcastle/gates.yaml": GATES });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    repo.commit({ "src/a.ts": "export {};\n" }, "already done");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/T-123"]);
+    const remoteTip = gitOut(origin, ["rev-parse", "agent/T-123"]);
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      resultFile: DONE,
+      error: CRASH,
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+    expect(outcome.outcome).toBe("done");
+    expect(outcome.run).toMatchObject({ resultFix: "recovered-after-exit" });
+  });
+
+  it("does not recover a timeout even when the result file is valid", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      resultFile: DONE,
+      error: { kind: "timeout", message: "idle" },
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+    expect(outcome.outcome).toBe("timeout");
+    expect(outcome.run).not.toMatchObject({
+      resultFix: "recovered-after-exit",
+    });
+  });
+
+  it("does not recover invalid-output even when the result file is valid", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      resultFile: DONE,
+      output: { status: "done" },
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+    expect(outcome.outcome).toBe("invalid-output");
+  });
+
+  it("still uses the last-message <result> on a normal exit, not the result file", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      output: DONE,
+      resultFile: CANNOT_PROCEED,
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+    expect(outcome.outcome).toBe("done");
+    expect(outcome.run).not.toMatchObject({
+      resultFix: "recovered-after-exit",
+    });
+  });
+
+  it("ignores a result file over the size cap and fails the job when nothing else is valid", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, (ctx) => {
+      writeFileSync(
+        join(ctx.resultDir as string, "result.json"),
+        `${"x".repeat(AFK_OUT_RESULT_MAX_BYTES + 1)}\n`,
+      );
+      return {
+        files: { "src/a.ts": "export {};\n" },
+        error: CRASH,
+      };
+    });
+    await expect(
+      agentChange(
+        deps(runner),
+        context(
+          bundleFor({
+            stage: "implement",
+            agentBranch: "agent/T-123",
+            integrationBranch: "spec/s",
+          }),
+        ),
+        repo.dir,
+        slot("agent/T-123"),
+        { expectedOld: remoteTip, remoteTip },
+      ),
+    ).rejects.toBeInstanceOf(InfrastructureError);
+  });
+
+  it("fails the job when the result file is not valid JSON of this stage", async () => {
+    const remoteTip = ticketRemote();
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      resultFile: { status: "done" },
+      error: CRASH,
+    }));
+    await expect(
+      agentChange(
+        deps(runner),
+        context(
+          bundleFor({
+            stage: "implement",
+            agentBranch: "agent/T-123",
+            integrationBranch: "spec/s",
+          }),
+        ),
+        repo.dir,
+        slot("agent/T-123"),
+        { expectedOld: remoteTip, remoteTip },
+      ),
+    ).rejects.toBeInstanceOf(InfrastructureError);
   });
 });

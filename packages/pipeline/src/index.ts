@@ -29,6 +29,7 @@ export {
   overlaySkillsSha,
   PROMPTS,
   promptFor,
+  RESULT_FIXES,
   RESULT_REPAIR_IDLE_SECONDS,
   RESULT_REPAIR_WALL_CLOCK_MS,
   ReviewOutputSchema,
@@ -56,7 +57,12 @@ export {
 export type { ContractCopyProblem, ProvidedContract } from "./contract-copy.ts";
 export { checkContractCopies, copyPathOf } from "./contract-copy.ts";
 export type { CursorRunFacts } from "./cursor-result.ts";
-export { factsFromCursorLine, factsFromCursorLines } from "./cursor-result.ts";
+export {
+  factsFromCursorLine,
+  factsFromCursorLines,
+  lastAssistantFromCursorLine,
+  lastAssistantFromCursorLines,
+} from "./cursor-result.ts";
 export type {
   E2eCounts,
   E2eOutcome,
@@ -159,6 +165,7 @@ export {
   RECHECK_REF_PREFIX,
   recheckHit,
 } from "./recheck.ts";
+export { resultBlock } from "./result-block.ts";
 export type {
   ReviewAxisRun,
   ReviewFinding,
@@ -187,6 +194,9 @@ export type {
   SandcastleConfig,
 } from "./sandcastle.ts";
 export {
+  AFK_OUT_RESULT_FILE,
+  AFK_OUT_RESULT_MAX_BYTES,
+  AFK_OUT_SANDBOX_PATH,
   agentEnv,
   agentRunPlacement,
   CHECK_RESULT_SANDBOX_PATH,

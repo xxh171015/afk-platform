@@ -94,13 +94,19 @@ const depsCacheEnv = (path: string) => ({
   PIP_CACHE_DIR: `${path}/pip`,
 });
 export const REFS_SANDBOX_PATH = "/refs";
+export const AFK_OUT_SANDBOX_PATH = "/afk-out";
+export const AFK_OUT_RESULT_FILE = "result.json";
+export const AFK_OUT_RESULT_MAX_BYTES = 1_000_000;
 
-// Read-only mounts: the context the agent reads, the skills, and the result checker. Nothing else from the host is visible.
+// Read-only mounts: the context the agent reads, the skills, and the result checker. The one writable host
+// mount is the per-run empty /afk-out directory, when this agent run has one. Gate sandboxes and result-repair
+// runs omit it.
 export function sandboxMounts(input: {
   ctxDir?: string;
   skillsMount: string;
   checkResultMount?: string;
   refs?: readonly { name: string; dir: string }[];
+  outDir?: string;
 }) {
   return [
     ...(input.ctxDir
@@ -128,6 +134,15 @@ export function sandboxMounts(input: {
             hostPath: input.checkResultMount,
             sandboxPath: CHECK_RESULT_SANDBOX_PATH,
             readonly: true,
+          },
+        ]
+      : []),
+    ...(input.outDir
+      ? [
+          {
+            hostPath: input.outDir,
+            sandboxPath: AFK_OUT_SANDBOX_PATH,
+            readonly: false,
           },
         ]
       : []),
@@ -438,6 +453,7 @@ const provider = (
   refs?: readonly { name: string; dir: string }[],
   placement?: SandboxPlacement,
   depsCacheDir?: string,
+  outDir?: string,
 ) => {
   const env = {
     ...config.sandboxEnv,
@@ -452,6 +468,7 @@ const provider = (
         skillsMount: config.skillsMount,
         checkResultMount: config.checkResultMount,
         refs,
+        ...(outDir ? { outDir } : {}),
       }),
       ...(depsCacheDir
         ? [
@@ -572,6 +589,11 @@ export class SandcastleAgentRunner implements AgentRunner {
       ? `${options.stage}-repair`
       : options.stage;
     try {
+      const outDir =
+        options.resultRepair || !options.resultDir
+          ? undefined
+          : options.resultDir;
+      if (outDir) mkdirSync(outDir, { recursive: true });
       const result = await run({
         agent: cursor(options.model ?? config.model, {
           env: agentEnv(config.cursorApiKey),
@@ -582,6 +604,8 @@ export class SandcastleAgentRunner implements AgentRunner {
           options.ctxDir,
           options.refs,
           agentRunPlacement(options),
+          undefined,
+          outDir,
         ),
         cwd: config.cwd,
         branchStrategy: {

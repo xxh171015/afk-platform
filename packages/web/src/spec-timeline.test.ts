@@ -48,6 +48,7 @@ describe("the spec timeline", () => {
       "merged",
       "action",
       "auto-retry",
+      "recovered-after-exit",
     ]);
   });
 

@@ -62,7 +62,9 @@ const RunFacts = z.object({
   durationMs: z.number().int().min(0).optional(),
   durationApiMs: z.number().int().min(0).optional(),
   tokenUsage: z.unknown().optional(),
-  resultFix: z.enum(["normalized", "repaired"]).optional(),
+  resultFix: z
+    .enum(["normalized", "repaired", "recovered-after-exit"])
+    .optional(),
   output: z.unknown().optional(),
   refShas: z.record(z.string(), z.string()).optional(),
   // Recheck trigger from a post-review code-changing stage (existing tests or config).
@@ -696,6 +698,20 @@ export async function writeFacts(
       runId,
       run.resultFix,
     ]);
+  }
+  if (run?.resultFix === "recovered-after-exit") {
+    await client.query(
+      `INSERT INTO events (spec_id, ticket_id, repo_id, run_id, type, source, data)
+       VALUES ($1, $2, $3, $4, $5, 'scheduler', $6)`,
+      [
+        owner.spec_id,
+        owner.ticket_id,
+        owner.repo_id,
+        runId,
+        owner.ticket_id != null ? "ticket" : "finalization",
+        JSON.stringify({ recoveredAfterExit: true, stage }),
+      ],
+    );
   }
 
   if (result?.gate) {

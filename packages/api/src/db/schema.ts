@@ -855,6 +855,7 @@ export const runs = pgTable(
     tokenUsage: jsonb("token_usage"),
     // null: accepted as written. `normalized`: preprocess made it valid.
     // `repaired`: a throwaway format-repair run rewrote <result>.
+    // `recovered-after-exit`: the agent process died after a valid result.
     resultFix: text("result_fix"),
     result: text("result"),
     output: jsonb("output"),

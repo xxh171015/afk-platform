@@ -247,7 +247,9 @@ const RunView = RunRow.extend({
   sources: z.array(z.string()).nullable(),
   durationApiMs: Id.nullable(),
   tokenUsage: z.unknown().nullable(),
-  resultFix: z.enum(["normalized", "repaired"]).nullable(),
+  resultFix: z
+    .enum(["normalized", "repaired", "recovered-after-exit"])
+    .nullable(),
   repoUrl: z.string(),
   hostKind: z.enum(HOST_KINDS),
 });

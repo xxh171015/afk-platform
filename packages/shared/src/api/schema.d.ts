@@ -3495,7 +3495,11 @@ export interface paths {
               durationApiMs: number | null;
               tokenUsage?: unknown;
               /** @enum {string|null} */
-              resultFix: "normalized" | "repaired" | null;
+              resultFix:
+                | "normalized"
+                | "repaired"
+                | "recovered-after-exit"
+                | null;
               repoUrl: string;
               /** @enum {string} */
               hostKind: "github" | "gitlab";
@@ -4080,7 +4084,8 @@ export interface paths {
                   | "resume"
                   | "merged"
                   | "action"
-                  | "auto-retry";
+                  | "auto-retry"
+                  | "recovered-after-exit";
                 at: string;
                 text: string;
                 runId?: number;
