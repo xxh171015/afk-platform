@@ -1,6 +1,7 @@
 import {
   BASELINE_GATE_JOB,
   type BaselineGateState,
+  branchNames,
   formatDisplayId,
   specTransition,
 } from "@afk/shared";
@@ -8,7 +9,10 @@ import type pg from "pg";
 import { enqueueHostSync } from "../host/host-jobs.ts";
 import { enqueueJob, type Queryable } from "../jobs/queue.ts";
 import { rememberGateTestCases } from "../stages/gate-records.ts";
-import type { IntegrationBranch } from "./integration-branches.ts";
+import {
+  type IntegrationBranch,
+  integrationBranch,
+} from "./integration-branches.ts";
 
 export { BASELINE_GATE_JOB };
 
@@ -18,13 +22,14 @@ export interface BaselineGatePayload {
   specId: number;
   repoId: number;
   sha?: string;
+  recut?: boolean;
 }
 
 export function readBaselineGatePayload(job: {
   type?: string;
   payload: Record<string, unknown>;
 }): BaselineGatePayload | undefined {
-  const { specId, repoId, sha } = job.payload;
+  const { specId, repoId, sha, recut } = job.payload;
   if (job.type !== BASELINE_GATE_JOB || typeof specId !== "number")
     return undefined;
   if (typeof repoId !== "number") return undefined;
@@ -32,6 +37,7 @@ export function readBaselineGatePayload(job: {
     specId,
     repoId,
     ...(typeof sha === "string" && SHA_RE.test(sha) ? { sha } : {}),
+    ...(recut === true ? { recut: true } : {}),
   };
 }
 
@@ -57,6 +63,7 @@ export type BaselineGateHold = "ready" | "waiting" | "paused";
 export async function holdForBaselineGate(
   client: pg.PoolClient,
   specId: number,
+  options: { recut?: boolean } = {},
 ): Promise<BaselineGateHold> {
   const spec = await client.query<{
     baseline_gate_state: BaselineGateState | null;
@@ -89,7 +96,13 @@ export async function holdForBaselineGate(
     [specId],
   );
   for (const cut of cuts) {
-    await enqueueBaselineGate(client, specId, cut.repoId, cut.sha);
+    await enqueueBaselineGate(
+      client,
+      specId,
+      cut.repoId,
+      cut.sha,
+      options.recut === true,
+    );
   }
   return "waiting";
 }
@@ -119,6 +132,7 @@ async function enqueueBaselineGate(
   specId: number,
   repoId: number,
   sha: string,
+  recut = false,
 ): Promise<void> {
   const prefix = keyPrefix(specId, repoId);
   const earlier = await client.query<{ n: string }>(
@@ -127,7 +141,7 @@ async function enqueueBaselineGate(
   );
   await enqueueJob(client, {
     type: BASELINE_GATE_JOB,
-    payload: { specId, repoId, sha },
+    payload: { specId, repoId, sha, ...(recut ? { recut: true } : {}) },
     idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
   });
 }
@@ -145,17 +159,49 @@ export async function baselineGateTask(
       payload.repoId,
     ])
   ).rows[0];
-  return repo
-    ? {
-        repo: {
-          name: repo.name,
-          url: repo.url,
-          defaultBranch: repo.default_branch,
-        },
-        sha: payload.sha,
-        specId: payload.specId,
-      }
-    : undefined;
+  if (!repo) return undefined;
+  const task = {
+    repo: {
+      name: repo.name,
+      url: repo.url,
+      defaultBranch: repo.default_branch,
+    },
+    sha: payload.sha,
+    specId: payload.specId,
+  };
+  if (!payload.recut) return task;
+  const spec = (
+    await pool.query<{
+      slug: string;
+      branch_namespace: string | null;
+      planning_repo_id: number | null;
+      planning_sha: string | null;
+      planning_state: string | null;
+      planning_docs_committed: boolean;
+      integration_branches: IntegrationBranch[];
+    }>(
+      `SELECT slug, branch_namespace, planning_repo_id, planning_sha, planning_state,
+              planning_docs_committed, integration_branches
+       FROM specs WHERE id = $1`,
+      [payload.specId],
+    )
+  ).rows[0];
+  if (!spec) return task;
+  const named = spec.integration_branches.find(
+    (branch) => branch.repoId === payload.repoId,
+  )?.branch;
+  const branch =
+    named ?? branchNames(spec.branch_namespace).integration(spec.slug);
+  const recut: { branch: string; planningSha?: string } = { branch };
+  if (
+    spec.planning_repo_id === payload.repoId &&
+    spec.planning_state === "done" &&
+    spec.planning_docs_committed &&
+    typeof spec.planning_sha === "string"
+  ) {
+    recut.planningSha = spec.planning_sha;
+  }
+  return { ...task, recut };
 }
 
 interface BaselineGateResult {
@@ -349,6 +395,7 @@ export async function recordBaselineResult(
   );
   const hold = await settleBaselineJobs(client, payload.specId);
   if (hold === "ready") {
+    await resumeAfterBaselinePass(client, payload.specId);
     const { schedulePass } = await import("../scheduling/scheduler.ts");
     const scheduled = await schedulePass(client, payload.specId);
     if (!scheduled.paused) {
@@ -404,6 +451,25 @@ async function settleBaselineJobs(
   return "ready";
 }
 
+async function resumeAfterBaselinePass(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<void> {
+  const current = await client.query<{
+    state: string;
+    pause_reason: string | null;
+  }>("SELECT state, pause_reason FROM specs WHERE id = $1", [specId]);
+  const row = current.rows[0];
+  if (row?.state !== "paused" || row.pause_reason !== "baseline-gate-failed")
+    return;
+  const next = specTransition("paused", "resume");
+  if (!next.ok) return;
+  await client.query(
+    "UPDATE specs SET state = $2, pause_reason = NULL WHERE id = $1",
+    [specId, next.state],
+  );
+}
+
 async function pauseForBaseline(
   client: pg.PoolClient,
   specId: number,
@@ -449,7 +515,13 @@ export async function baselineGateFailed(
         )
       ).rows[0]?.default_sha;
     if (typeof sha === "string" && SHA_RE.test(sha))
-      await enqueueBaselineGate(client, payload.specId, payload.repoId, sha);
+      await enqueueBaselineGate(
+        client,
+        payload.specId,
+        payload.repoId,
+        sha,
+        payload.recut === true,
+      );
     return "requeued";
   }
   await pauseForBaseline(client, payload.specId);
@@ -511,13 +583,46 @@ export async function baselineFailuresOf(
   }));
 }
 
+export async function recutBaselineCuts(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<void> {
+  const spec = await client.query<{
+    integration_branches: IntegrationBranch[];
+  }>("SELECT integration_branches FROM specs WHERE id = $1", [specId]);
+  const branches = spec.rows[0]?.integration_branches ?? [];
+  if (branches.length === 0) return;
+  const ids = branches.map((branch) => branch.repoId);
+  const { rows } = await client.query<{
+    id: number;
+    default_sha: string | null;
+  }>("SELECT id, default_sha FROM repos WHERE id = ANY($1::int[])", [ids]);
+  const shaById = new Map(rows.map((row) => [row.id, row.default_sha]));
+  await client.query(
+    "UPDATE specs SET integration_branches = $2 WHERE id = $1",
+    [
+      specId,
+      JSON.stringify(
+        branches.map((branch) =>
+          integrationBranch(
+            branch.repoId,
+            branch.branch,
+            shaById.get(branch.repoId),
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
 export async function enqueueBaselineGates(
   client: pg.PoolClient,
   specId: number,
+  options: { recut?: boolean } = {},
 ): Promise<void> {
   await client.query(
     "UPDATE specs SET baseline_gate_state = NULL WHERE id = $1",
     [specId],
   );
-  await holdForBaselineGate(client, specId);
+  await holdForBaselineGate(client, specId, options);
 }

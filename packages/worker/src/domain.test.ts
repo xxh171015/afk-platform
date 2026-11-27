@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { gitOrThrow } from "@afk/pipeline";
 import { bundleFor, makeRepo, type TestRepo } from "@afk/pipeline/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { cutIntegrationBranch, fetchDomain } from "./domain.ts";
+import {
+  cutIntegrationBranch,
+  fetchDomain,
+  recutIntegrationBranch,
+} from "./domain.ts";
 import { type PushFn, pushRef } from "./push.ts";
 import { RepoStore } from "./repos.ts";
 
@@ -381,5 +385,116 @@ describe("cutIntegrationBranch", () => {
         cutIntegrationBranch(repos, rejectCreate, mainDir, bundle),
       ).rejects.toThrow(`could not create ${BRANCH}: ${LOCK_REF}`);
     });
+  });
+});
+
+describe("recutIntegrationBranch", () => {
+  const BRANCH = "spec/1/order-export";
+
+  it("force-updates an existing integration branch from current main and pushes with lease of the old tip", async () => {
+    const frontend = origin({ "src/a.ts": "a\n" });
+    const first = gitOrThrow(frontend.dir, ["rev-parse", "HEAD"]);
+    const repos = store();
+    const mainDir = await repos.ensure("frontend", frontend.dir, "main");
+    gitOrThrow(mainDir, ["update-ref", `refs/heads/${BRANCH}`, first]);
+    gitOrThrow(frontend.dir, ["update-ref", `refs/heads/${BRANCH}`, first]);
+    const later = frontend.commit({ "src/b.ts": "b\n" }, "fix on main");
+    await repos.ensure("frontend", frontend.dir, "main");
+    const expectedOld: string[] = [];
+    await recutIntegrationBranch(
+      repos,
+      async (request) => {
+        expectedOld.push(request.expectedOld ?? "missing");
+        return pushRef(request);
+      },
+      mainDir,
+      {
+        repo: {
+          name: "frontend",
+          url: frontend.dir,
+          defaultBranch: "main",
+        },
+        branch: BRANCH,
+        mainSha: later,
+      },
+    );
+    expect(later).not.toBe(first);
+    expect(gitOrThrow(mainDir, ["rev-parse", BRANCH])).toBe(later);
+    expect(gitOrThrow(frontend.dir, ["rev-parse", BRANCH])).toBe(later);
+    expect(expectedOld).toEqual([first]);
+  });
+
+  it("replays the planning commit onto the new setup base", async () => {
+    const planning = origin({
+      "src/a.ts": "a\n",
+      "GLOSSARY.md": "# v1\n",
+    });
+    const first = gitOrThrow(planning.dir, ["rev-parse", "HEAD"]);
+    const docs = planning.commit({ "GLOSSARY.md": "# v2\n" }, "planning docs");
+    gitOrThrow(planning.dir, ["update-ref", `refs/heads/${BRANCH}`, docs]);
+    gitOrThrow(planning.dir, ["checkout", "--quiet", "-B", "main", first]);
+    const later = planning.commit({ "src/b.ts": "b\n" }, "fix on main");
+    const repos = store();
+    const mainDir = await repos.ensure("backend", planning.dir, "main");
+    gitOrThrow(mainDir, ["update-ref", `refs/heads/${BRANCH}`, docs]);
+    await recutIntegrationBranch(
+      repos,
+      (request) => pushRef(request),
+      mainDir,
+      {
+        repo: {
+          name: "backend",
+          url: planning.dir,
+          defaultBranch: "main",
+        },
+        branch: BRANCH,
+        mainSha: later,
+        planningSha: docs,
+      },
+    );
+    const tip = gitOrThrow(mainDir, ["rev-parse", BRANCH]);
+    expect(tip).not.toBe(docs);
+    expect(tip).not.toBe(later);
+    expect(gitOrThrow(mainDir, ["show", `${tip}:GLOSSARY.md`])).toBe("# v2");
+    expect(gitOrThrow(mainDir, ["show", `${tip}:src/b.ts`])).toBe("b");
+    expect(gitOrThrow(planning.dir, ["rev-parse", BRANCH])).toBe(tip);
+  });
+
+  it("starts at setupBase only when planning was waived", async () => {
+    const frontend = origin({ "src/a.ts": "a\n" });
+    const setup = pushSetup(frontend, {
+      ".sandcastle/gates.yaml": "steps: []\n",
+    });
+    const first = gitOrThrow(frontend.dir, ["rev-parse", "HEAD"]);
+    const repos = store();
+    const mainDir = await repos.ensure("frontend", frontend.dir, "main");
+    gitOrThrow(mainDir, ["update-ref", `refs/heads/${BRANCH}`, first]);
+    gitOrThrow(frontend.dir, ["update-ref", `refs/heads/${BRANCH}`, first]);
+    const later = frontend.commit({ "src/b.ts": "b\n" }, "fix on main");
+    await repos.ensure("frontend", frontend.dir, "main");
+    await recutIntegrationBranch(
+      repos,
+      (request) => pushRef(request),
+      mainDir,
+      {
+        repo: {
+          name: "frontend",
+          url: frontend.dir,
+          defaultBranch: "main",
+        },
+        branch: BRANCH,
+        mainSha: later,
+      },
+    );
+    const tip = gitOrThrow(frontend.dir, ["rev-parse", BRANCH]);
+    expect(
+      gitOrThrow(frontend.dir, ["log", "-1", "--format=%P%n%an%n%s", tip]),
+    ).toBe(
+      `${later} ${setup}\nafk-worker\nSet up for the AFK platform (afk/setup)`,
+    );
+    expect(
+      gitOrThrow(frontend.dir, ["show", `${tip}:.sandcastle/gates.yaml`]),
+    ).toBe("steps: []");
+    expect(gitOrThrow(frontend.dir, ["show", `${tip}:src/b.ts`])).toBe("b");
   });
 });

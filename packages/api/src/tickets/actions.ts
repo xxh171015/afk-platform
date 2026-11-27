@@ -32,6 +32,10 @@ import {
   enqueueStageJob,
 } from "../jobs/stage-jobs.ts";
 import {
+  enqueueBaselineGates,
+  recutBaselineCuts,
+} from "../planning/baseline-gate.ts";
+import {
   inTransaction,
   lockSpec,
   schedulePass,
@@ -1233,6 +1237,32 @@ export async function continueBaseline(
   specId: number,
 ): Promise<ActionResult<{ state: SpecState }>> {
   return unpauseSpec(pool, specId, "continue-baseline", 0);
+}
+
+export async function recheckBaseline(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return inTransaction(pool, async (client) => {
+    const state = await lockedSpecState(client, specId);
+    if (!state) return { status: "no-ticket" };
+    const paused = await client.query<{ pause_reason: string | null }>(
+      "SELECT pause_reason FROM specs WHERE id = $1",
+      [specId],
+    );
+    if (
+      state !== "paused" ||
+      paused.rows[0]?.pause_reason !== "baseline-gate-failed"
+    ) {
+      return refused(
+        `only a spec paused by baseline-gate-failed can recut from current main; this one is ${state}${paused.rows[0]?.pause_reason ? ` (${paused.rows[0].pause_reason})` : ""}`,
+      );
+    }
+    await recutBaselineCuts(client, specId);
+    await enqueueBaselineGates(client, specId, { recut: true });
+    await recordAction(client, "recheck-baseline", { specId });
+    return { status: "ok", state: "paused" };
+  });
 }
 
 export async function allowSpec(

@@ -15,6 +15,7 @@ import { importBody } from "../test/ticket-files.ts";
 const CUT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TREE = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const BLOB = "cccccccccccccccccccccccccccccccccccccccc";
+const NEW_CUT = "dddddddddddddddddddddddddddddddddddddddd";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -439,5 +440,241 @@ describe("baseline gate after confirm", () => {
     expect(confirmed.status).toBe(200);
     expect(await baselineJobs()).toEqual([]);
     expect(confirmed.body.enqueued).toMatchObject([{ ticketId: 1 }]);
+  });
+});
+
+describe("baseline gate recheck", () => {
+  async function pauseOnBaselineFail(repos = ["backend"]) {
+    const { specId } = await draftSpec({ repos, cutSha: CUT });
+    await call("POST", `/specs/${specId}/confirm`);
+    const worker = new FakeWorker(api.url, "w1");
+    for (let i = 0; i < repos.length; i++) {
+      await completeBaseline(worker, {
+        pass: false,
+        reasons: ["test failed (exit 1)"],
+        failingTests: ["orders exports"],
+        log: "AssertionError: expected 1",
+      });
+    }
+    return { specId, worker };
+  }
+
+  it("recheck-baseline recuts stored SHAs, enqueues new gates, stays paused, and records a human action", async () => {
+    const { specId, worker } = await pauseOnBaselineFail([
+      "backend",
+      "frontend",
+    ]);
+    await db.pool.query("UPDATE repos SET default_sha = $1", [NEW_CUT]);
+    const before = (await baselineJobs()).length;
+
+    const recut = await call("POST", `/specs/${specId}/recheck-baseline`);
+    expect(recut.status).toBe(200);
+    expect(recut.body).toMatchObject({ state: "paused" });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT state, pause_reason, baseline_gate_state FROM specs WHERE id = $1",
+          [specId],
+        )
+      ).rows[0],
+    ).toEqual({
+      state: "paused",
+      pause_reason: "baseline-gate-failed",
+      baseline_gate_state: "pending",
+    });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT integration_branches FROM specs WHERE id = $1",
+          [specId],
+        )
+      ).rows[0].integration_branches,
+    ).toEqual([
+      expect.objectContaining({ repoId: 1, mainSha: NEW_CUT }),
+      expect.objectContaining({ repoId: 2, mainSha: NEW_CUT }),
+    ]);
+    const jobs = await baselineJobs();
+    expect(jobs).toHaveLength(before + 2);
+    expect(jobs.slice(-2)).toMatchObject([
+      {
+        type: "baseline-gate",
+        state: "queued",
+        payload: { specId, repoId: 1, sha: NEW_CUT, recut: true },
+      },
+      {
+        type: "baseline-gate",
+        state: "queued",
+        payload: { specId, repoId: 2, sha: NEW_CUT, recut: true },
+      },
+    ]);
+    expect(
+      (await db.pool.query("SELECT state FROM tickets ORDER BY id")).rows.map(
+        (row) => row.state,
+      ),
+    ).toEqual(["pending", "pending"]);
+    const claimed = await worker.claim({ takeSlot: false });
+    const job = claimed.body.job;
+    expect(job?.type).toBe("baseline-gate");
+    if (!job) throw new Error("no baseline-gate job");
+    const task = await call(
+      "GET",
+      `/worker/jobs/${job.id}/baseline-task?workerId=${worker.id}&attempt=${job.attempt}`,
+    );
+    expect(task.status).toBe(200);
+    expect(task.body).toMatchObject({
+      specId,
+      sha: NEW_CUT,
+      recut: { branch: expect.stringMatching(/^spec\//) },
+    });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT type, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "action",
+          action: "recheck-baseline",
+        }),
+      ]),
+    );
+    expect(
+      (
+        await db.pool.query(
+          "SELECT data->>'action' AS action FROM events WHERE type = 'action'",
+        )
+      ).rows.some((row) => row.action === "retry"),
+    ).toBe(false);
+  });
+
+  it("passing every recut baseline gate resumes the spec and starts tickets from the new cut", async () => {
+    const { specId, worker } = await pauseOnBaselineFail([
+      "backend",
+      "frontend",
+    ]);
+    await db.pool.query("UPDATE repos SET default_sha = $1", [NEW_CUT]);
+    await call("POST", `/specs/${specId}/recheck-baseline`);
+    await completeBaseline(worker, { pass: true, reasons: [] });
+    expect(
+      (await db.pool.query("SELECT state FROM tickets ORDER BY id")).rows.map(
+        (row) => row.state,
+      ),
+    ).toEqual(["pending", "pending"]);
+    await completeBaseline(worker, { pass: true, reasons: [] });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT state, pause_reason, baseline_gate_state FROM specs WHERE id = $1",
+          [specId],
+        )
+      ).rows[0],
+    ).toEqual({
+      state: "running",
+      pause_reason: null,
+      baseline_gate_state: "done",
+    });
+    expect(
+      (await db.pool.query("SELECT state FROM tickets ORDER BY id")).rows.map(
+        (row) => row.state,
+      ),
+    ).toEqual(["queued", "queued"]);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT type FROM jobs WHERE type = 'agent-run' ORDER BY id",
+        )
+      ).rows,
+    ).toHaveLength(2);
+  });
+
+  it("keeps the spec paused when a recut baseline gate still fails, and shows the new failing tests", async () => {
+    const { specId, worker } = await pauseOnBaselineFail();
+    await db.pool.query("UPDATE repos SET default_sha = $1", [NEW_CUT]);
+    await call("POST", `/specs/${specId}/recheck-baseline`);
+    await completeBaseline(worker, {
+      pass: false,
+      reasons: ["test failed (exit 1)"],
+      failingTests: ["checkout totals"],
+      log: "AssertionError: expected 2",
+    });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT state, pause_reason, baseline_gate_state FROM specs WHERE id = $1",
+          [specId],
+        )
+      ).rows[0],
+    ).toEqual({
+      state: "paused",
+      pause_reason: "baseline-gate-failed",
+      baseline_gate_state: "pending",
+    });
+    expect(
+      (await db.pool.query("SELECT state FROM tickets")).rows[0].state,
+    ).toBe("pending");
+
+    const blocked = await call("GET", "/blocked");
+    expect(blocked.body.specs).toMatchObject([
+      {
+        displayId: "S-1",
+        reason: "baseline-gate-failed",
+        baselineFailures: [
+          {
+            repo: "backend",
+            reasons: ["test failed (exit 1)"],
+            failingTests: ["checkout totals"],
+            log: "AssertionError: expected 2",
+          },
+        ],
+      },
+    ]);
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.body.spec.baselineFailures).toMatchObject([
+      {
+        repo: "backend",
+        failingTests: ["checkout totals"],
+      },
+    ]);
+  });
+
+  it("requeues a failed recut baseline-gate job still as a recut of the new cut", async () => {
+    const { specId, worker } = await pauseOnBaselineFail();
+    await db.pool.query("UPDATE repos SET default_sha = $1", [NEW_CUT]);
+    await call("POST", `/specs/${specId}/recheck-baseline`);
+    const claimed = await worker.claim({ takeSlot: false });
+    const job = claimed.body.job;
+    expect(job?.type).toBe("baseline-gate");
+    if (!job) throw new Error("no baseline-gate job");
+    await worker.fail(job.id, job.attempt, "could not recut");
+    const queued = (await baselineJobs()).filter(
+      (row) => row.state === "queued",
+    );
+    expect(queued.at(-1)?.payload).toMatchObject({
+      specId,
+      repoId: 1,
+      sha: NEW_CUT,
+      recut: true,
+    });
+  });
+
+  it("refuses recheck-baseline unless the spec is paused by baseline-gate-failed", async () => {
+    const { specId } = await draftSpec({ cutSha: CUT });
+    expect(
+      (await call("POST", `/specs/${specId}/recheck-baseline`)).status,
+    ).toBe(409);
+    await call("POST", `/specs/${specId}/confirm`);
+    const worker = new FakeWorker(api.url, "w1");
+    await completeBaseline(worker, {
+      pass: false,
+      reasons: ["test failed (exit 1)"],
+    });
+    const continued = await call("POST", `/specs/${specId}/continue-baseline`);
+    expect(continued.status).toBe(200);
+    expect(
+      (await call("POST", `/specs/${specId}/recheck-baseline`)).status,
+    ).toBe(409);
+    expect((await call("POST", "/specs/99/recheck-baseline")).status).toBe(404);
   });
 });

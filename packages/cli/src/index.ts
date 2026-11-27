@@ -2556,6 +2556,20 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
+    .command("recheck-baseline <spec>")
+    .description(
+      "recut integration branches from current main and run the baseline gate again (重新检查)",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{id}/recheck-baseline",
+        { params: { path: { id: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id} is ${data.state}`);
+    });
+
+  spec
     .command("cancel <spec>")
     .description(
       "give up a spec: its unfinished tickets are cancelled and its jobs stopped (merged work stays); a worker that has the code host then closes its open pull requests and deletes its spec/* and agent/* branches. A spec with a merged pull request cannot be cancelled",

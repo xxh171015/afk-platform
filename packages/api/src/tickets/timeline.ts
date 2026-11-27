@@ -103,6 +103,8 @@ function actionText(
       return "改参考仓库";
     case "continue-baseline":
       return "不管它继续";
+    case "recheck-baseline":
+      return "重新检查";
     default:
       return action;
   }

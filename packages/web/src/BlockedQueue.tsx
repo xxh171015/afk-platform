@@ -525,13 +525,20 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
     });
     if (!data) throw new Error(describeError(error));
   });
+  const recheckBaseline = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/recheck-baseline", {
+      params: { path: { id: spec.id } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
   const busy =
     retry.isPending ||
     allow.isPending ||
     cancel.isPending ||
     approveRemoved.isPending ||
     approveRecheck.isPending ||
-    continueBaseline.isPending;
+    continueBaseline.isPending ||
+    recheckBaseline.isPending;
   return (
     <Card
       category="paused"
@@ -579,16 +586,29 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
               </label>
             ) : null}
             {baseline ? (
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy}
-                onClick={() => continueBaseline.mutate()}
-              >
-                <Spinner on={continueBaseline.isPending} />
-                {!continueBaseline.isPending && <Play />}
-                不管它继续
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => recheckBaseline.mutate()}
+                >
+                  <Spinner on={recheckBaseline.isPending} />
+                  {!recheckBaseline.isPending && <RotateCcw />}
+                  重新检查
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => continueBaseline.mutate()}
+                >
+                  <Spinner on={continueBaseline.isPending} />
+                  {!continueBaseline.isPending && <Play />}
+                  不管它继续
+                </Button>
+              </>
             ) : (
               <>
                 <Button
@@ -649,7 +669,8 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
                 allow.error ??
                 cancel.error ??
                 approveRemoved.error ??
-                continueBaseline.error
+                continueBaseline.error ??
+                recheckBaseline.error
               }
             />
           </form>
