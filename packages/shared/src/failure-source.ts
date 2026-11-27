@@ -254,5 +254,6 @@ export const HUMAN_ACTIONS = [
   "edit-refs",
   "request-changes",
   "continue-baseline",
+  "recheck-baseline",
 ] as const;
 export type HumanAction = (typeof HUMAN_ACTIONS)[number];

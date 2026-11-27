@@ -38,6 +38,7 @@ import {
   editTicket,
   handbackTicket,
   parkedRetryNote,
+  recheckBaseline,
   resumeSpec,
   retrySpecCleanup,
   retryTicket,
@@ -1144,6 +1145,20 @@ const continueBaselineRoute = createRoute({
   },
 });
 
+const recheckBaselineRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/recheck-baseline",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Integration branches recut from current main; baseline gates run again",
+      z.object({ state: z.enum(SPEC_STATES) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec is not paused by baseline-gate-failed", ErrorReply),
+  },
+});
+
 const cancelSpecRoute = createRoute({
   method: "post",
   path: "/specs/{id}/cancel",
@@ -1524,6 +1539,17 @@ export function registerTicketRoutes(
   app.openapi(continueBaselineRoute, async (c) => {
     const result = await aroundSpec(context, c.req.valid("param").id, () =>
       continueBaseline(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(recheckBaselineRoute, async (c) => {
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      recheckBaseline(pool, c.req.valid("param").id),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);

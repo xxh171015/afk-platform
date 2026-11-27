@@ -456,7 +456,10 @@ function pausedSpecLines(s: PausedSpecLike): string[] {
         : []),
     ]),
     ...(s.reason === "baseline-gate-failed"
-      ? [`    then: plat spec continue-baseline ${s.displayId}`]
+      ? [
+          `    then: plat spec recheck-baseline ${s.displayId}`,
+          `    or: plat spec continue-baseline ${s.displayId}`,
+        ]
       : []),
   ];
 }

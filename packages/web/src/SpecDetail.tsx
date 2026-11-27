@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check } from "lucide-react";
+import { AlertTriangle, Check, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { IdChip, Mono, RepoTag } from "./components/afk/badges.tsx";
@@ -96,6 +96,20 @@ export function SpecDetail({
   const continueBaseline = useMutation({
     mutationFn: async () => {
       const { data, error } = await api.POST("/specs/{id}/continue-baseline", {
+        params: { path: { id: specId } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["spec", specId] });
+      void queryClient.invalidateQueries({ queryKey: ["specs"] });
+      void queryClient.invalidateQueries({ queryKey: ["blocked"] });
+    },
+  });
+  const recheckBaseline = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.POST("/specs/{id}/recheck-baseline", {
         params: { path: { id: specId } },
       });
       if (!data) throw new Error(describeError(error));
@@ -255,14 +269,30 @@ export function SpecDetail({
             </a>
           ) : null}
           {spec.pauseReason === "baseline-gate-failed" ? (
-            <Button
-              type="button"
-              size="sm"
-              disabled={continueBaseline.isPending}
-              onClick={() => continueBaseline.mutate()}
-            >
-              不管它继续
-            </Button>
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={
+                  recheckBaseline.isPending || continueBaseline.isPending
+                }
+                onClick={() => recheckBaseline.mutate()}
+              >
+                <RotateCcw />
+                重新检查
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={
+                  continueBaseline.isPending || recheckBaseline.isPending
+                }
+                onClick={() => continueBaseline.mutate()}
+              >
+                不管它继续
+              </Button>
+            </>
           ) : null}
         </div>
       ) : null}

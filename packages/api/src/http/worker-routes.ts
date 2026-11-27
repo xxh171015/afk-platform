@@ -673,6 +673,12 @@ const baselineTaskRoute = createRoute({
             }),
             sha: z.string().optional(),
             specId: z.number().int(),
+            recut: z
+              .object({
+                branch: z.string(),
+                planningSha: z.string().optional(),
+              })
+              .optional(),
           }),
         },
       },
