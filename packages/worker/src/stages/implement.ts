@@ -278,6 +278,13 @@ export async function agentChange(
         `could not take ${agent} back: ${taken.error ?? "no such branch in the slot"}`,
         billed,
       );
+    if (taken.orphan) {
+      log(
+        `retrieve: ${agent} was not an ancestor of the slot; kept ${taken.orphan.orphanSha} at ${taken.orphan.orphanRef}`,
+      );
+      facts.orphanRef = taken.orphan.orphanRef;
+      facts.orphanSha = taken.orphan.orphanSha;
+    }
     const stamped = stampTrailers({
       repoDir: mainDir,
       branch: agent,

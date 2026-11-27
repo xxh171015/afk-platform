@@ -162,10 +162,92 @@ describe("alignTicketBranch", () => {
     gitOrThrow(local.dir, ["branch", BRANCH]);
     const sha = shaOf(local.dir, HEADS);
     const orphan = orphanRefFor(BRANCH, sha);
+    const salvage = `refs/afk/salvage/${BRANCH}/1-1`;
     gitOrThrow(local.dir, ["update-ref", orphan, sha]);
-    expect(deleteOrphanRefs(local.dir, [BRANCH])).toEqual([orphan]);
+    gitOrThrow(local.dir, ["update-ref", salvage, sha]);
+    expect(deleteOrphanRefs(local.dir, [BRANCH])).toEqual([orphan, salvage]);
     expect(
       git(local.dir, ["show-ref", "--verify", "--quiet", orphan]).code,
+    ).not.toBe(0);
+    expect(
+      git(local.dir, ["show-ref", "--verify", "--quiet", salvage]).code,
+    ).not.toBe(0);
+  });
+
+  it("fast-forwards a salvage backup that is a descendant of the current tip", async () => {
+    gitOrThrow(local.dir, ["branch", BRANCH]);
+    gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
+    const remoteTip = shaOf(local.dir, HEADS);
+    gitOrThrow(local.dir, ["symbolic-ref", "HEAD", HEADS]);
+    const salvaged = commit(local.dir, "salvage.txt", "salvaged");
+    gitOrThrow(local.dir, [
+      "update-ref",
+      `refs/afk/salvage/${BRANCH}/1-1`,
+      salvaged,
+    ]);
+    gitOrThrow(local.dir, ["update-ref", HEADS, remoteTip]);
+
+    const aligned = await alignTicketBranch(local.dir, BRANCH);
+    expect(aligned.expectedOld).toBe(remoteTip);
+    expect(aligned.remoteTip).toBe(remoteTip);
+    expect(aligned.salvage).toEqual({
+      adopted: {
+        salvageRef: `refs/afk/salvage/${BRANCH}/1-1`,
+        sha: salvaged,
+      },
+    });
+    expect(shaOf(local.dir, HEADS)).toBe(salvaged);
+    expect(
+      git(local.dir, [
+        "show-ref",
+        "--verify",
+        "--quiet",
+        `refs/afk/salvage/${BRANCH}/1-1`,
+      ]).code,
+    ).not.toBe(0);
+  });
+
+  it("keeps a salvage backup that is not a descendant as an orphan ref", async () => {
+    gitOrThrow(local.dir, ["branch", BRANCH]);
+    gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
+    gitOrThrow(local.dir, ["checkout", "--quiet", "-B", "tmp"]);
+    const other = commit(local.dir, "other.txt", "other line");
+    gitOrThrow(local.dir, [
+      "update-ref",
+      `refs/afk/salvage/${BRANCH}/1-1`,
+      other,
+    ]);
+    gitOrThrow(local.dir, ["checkout", "--quiet", BRANCH]);
+    gitOrThrow(local.dir, ["branch", "-D", "tmp"]);
+    gitOrThrow(local.dir, ["symbolic-ref", "HEAD", HEADS]);
+    const remoteTip = commit(local.dir, "branch.txt", "branch line");
+    gitOrThrow(local.dir, ["push", "--quiet", "origin", BRANCH]);
+
+    const aligned = await alignTicketBranch(local.dir, BRANCH);
+    const orphan = orphanRefFor(BRANCH, other);
+    expect(aligned).toEqual({
+      expectedOld: remoteTip,
+      remoteTip,
+      orphan: { orphanRef: orphan, orphanSha: other },
+      salvage: {
+        converted: [
+          {
+            salvageRef: `refs/afk/salvage/${BRANCH}/1-1`,
+            orphanRef: orphan,
+            orphanSha: other,
+          },
+        ],
+      },
+    });
+    expect(shaOf(local.dir, HEADS)).toBe(remoteTip);
+    expect(shaOf(local.dir, orphan)).toBe(other);
+    expect(
+      git(local.dir, [
+        "show-ref",
+        "--verify",
+        "--quiet",
+        `refs/afk/salvage/${BRANCH}/1-1`,
+      ]).code,
     ).not.toBe(0);
   });
 });

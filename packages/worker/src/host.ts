@@ -37,7 +37,7 @@ export interface HostDeps {
   ) => Promise<AppAccess | GitLabAccess>;
   // default-branch clone for index-pr-links; host-sync never clones
   repoDir?: string;
-  // main clones whose local orphan refs belong to the branches this spec-cleanup deletes
+  // main clones whose local orphan and salvage backup refs belong to the branches this spec-cleanup deletes
   localRepos?: string[];
 }
 

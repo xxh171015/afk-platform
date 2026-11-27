@@ -264,7 +264,26 @@ describe("zombie slots", () => {
       git(main.dir, ["rev-parse", "--verify", "--quiet", "agent/T-1"]).code,
     ).not.toBe(0);
     await acquire(manager(1), task(2));
-    expect(gitOut(main.dir, ["show", "agent/T-1:done.ts"])).toBe("export {};");
+    expect(
+      git(main.dir, ["rev-parse", "--verify", "--quiet", "agent/T-1"]).code,
+    ).not.toBe(0);
+    expect(
+      gitOut(main.dir, ["show", "refs/afk/salvage/agent/T-1/1-1:done.ts"]),
+    ).toBe("export {};");
+  });
+
+  it("does not move the ticket branch; it writes a salvage backup ref instead", async () => {
+    await abandoned({ commit: true, pid: deadPid() });
+    git(main.dir, ["branch", "agent/T-1", "HEAD"]);
+    const before = gitOut(main.dir, ["rev-parse", "agent/T-1"]);
+    await acquire(manager(1), task(2));
+    expect(gitOut(main.dir, ["rev-parse", "agent/T-1"])).toBe(before);
+    expect(gitOut(main.dir, ["show", "agent/T-1:src/a.ts"])).toBe(
+      "export const a = 1;",
+    );
+    expect(
+      gitOut(main.dir, ["show", "refs/afk/salvage/agent/T-1/1-1:done.ts"]),
+    ).toBe("export {};");
   });
 
   it("removes the sandboxes still running on the zombie's slot before anything of its is touched", async () => {
@@ -280,7 +299,9 @@ describe("zombie slots", () => {
       task(2),
     );
     expect(stopped).toEqual([{ dir: join(root, "0"), cloneStillThere: true }]);
-    expect(gitOut(main.dir, ["show", "agent/T-1:done.ts"])).toBe("export {};");
+    expect(
+      gitOut(main.dir, ["show", "refs/afk/salvage/agent/T-1/1-1:done.ts"]),
+    ).toBe("export {};");
     expect(logs.some((line) => /removed the sandbox.*abc123/.test(line))).toBe(
       true,
     );
@@ -308,7 +329,9 @@ describe("zombie slots", () => {
       JSON.stringify({ ...dead, pid: deadPid() }),
     );
     await acquire(manager(1), task(2));
-    expect(gitOut(main.dir, ["show", "agent/T-1:done.ts"])).toBe("export {};");
+    expect(
+      gitOut(main.dir, ["show", "refs/afk/salvage/agent/T-1/1-1:done.ts"]),
+    ).toBe("export {};");
     expect(logs.filter((line) => line.includes("extra ref"))).toEqual([]);
   });
 
@@ -382,13 +405,17 @@ describe("zombie slots", () => {
   });
 
   it("keeps the clone when the commits cannot be taken back, so no work is lost", async () => {
-    await abandoned({ commit: true, pid: deadPid() });
-    // main already has a diverged agent/T-1, so the fetch is refused
-    git(main.dir, ["branch", "agent/T-1", "HEAD"]);
-    main.commit({ "other.txt": "x\n" }, "main moved");
-    git(main.dir, ["checkout", "--quiet", "agent/T-1"]);
-    main.commit({ "diverged.txt": "y\n" }, "diverged");
-    git(main.dir, ["checkout", "--quiet", "main"]);
+    const slot = await abandoned({ commit: true, pid: deadPid() });
+    const tree = gitOut(slot.dir, ["rev-parse", "HEAD^{tree}"]);
+    const objectPath = join(
+      slot.dir,
+      ".git",
+      "objects",
+      tree.slice(0, 2),
+      tree.slice(2),
+    );
+    rmSync(objectPath);
+    writeFileSync(objectPath, "garbage", { mode: 0o644 });
     await acquire(manager(1), task(2));
     const kept = readdirSync(salvageDir).filter((n) => n.startsWith("clone-"));
     expect(kept).toEqual(["clone-job-1-attempt-1"]);
@@ -569,8 +596,48 @@ describe("taking the result back", () => {
     });
     expect(result.fetched).toBe(false);
     expect(result.error).toBeDefined();
+    expect(result.error).toMatch(/error:|fatal:|fsck|invalid|corrupt|missing/i);
     expect(has("agent/T-1")).toBe(false);
     expect(tip).toHaveLength(40);
+  });
+
+  it("takes a result that is not a descendant of the main clone's ticket branch and keeps the old tip as an orphan", () => {
+    const slotClone = slotWithBranches(["agent/T-1"]);
+    const slotTip = gitOut(slotClone, ["rev-parse", "agent/T-1"]);
+    git(main.dir, ["branch", "agent/T-1", "HEAD"]);
+    git(main.dir, ["checkout", "--quiet", "agent/T-1"]);
+    writeFileSync(join(main.dir, "diverged.txt"), "y\n");
+    git(main.dir, ["add", "-A"]);
+    git(main.dir, [
+      "-c",
+      "user.name=A",
+      "-c",
+      "user.email=a@b",
+      "commit",
+      "--quiet",
+      "-m",
+      "diverged",
+    ]);
+    const oldTip = gitOut(main.dir, ["rev-parse", "HEAD"]);
+    git(main.dir, ["checkout", "--quiet", "main"]);
+    const result = retrieveResult({
+      slotClone,
+      mainClone: main.dir,
+      ref: "agent/T-1",
+    });
+    expect(result.fetched).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(gitOut(main.dir, ["rev-parse", "agent/T-1"])).toBe(slotTip);
+    expect(gitOut(main.dir, ["show", "agent/T-1:agent-T-1.txt"])).toBe(
+      "agent/T-1",
+    );
+    const orphanRef = `refs/afk/orphan/agent/T-1/${oldTip}`;
+    expect(result.orphan).toEqual({
+      orphanRef,
+      orphanSha: oldTip,
+    });
+    expect(gitOut(main.dir, ["rev-parse", orphanRef])).toBe(oldTip);
+    expect(gitOut(main.dir, ["show", `${orphanRef}:diverged.txt`])).toBe("y");
   });
 
   it("is not fetched when the branch does not exist in the slot", () => {

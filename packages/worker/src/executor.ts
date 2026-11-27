@@ -182,9 +182,20 @@ async function runStage(
       `restart: dropped ${bundle.agentBranch}${align.remoteTip ? ` (origin was ${align.remoteTip})` : ""}`,
     );
   context.align = align;
-  if (align.orphan)
+  const salvageOrphan = align.salvage?.converted?.some(
+    (item) => item.orphanRef === align.orphan?.orphanRef,
+  );
+  if (align.orphan && !salvageOrphan)
     context.log(
       `align: ${bundle.agentBranch} follows origin ${align.remoteTip}; kept ${align.orphan.orphanSha} at ${align.orphan.orphanRef}`,
+    );
+  if (align.salvage?.adopted)
+    context.log(
+      `align: fast-forwarded ${bundle.agentBranch} from ${align.salvage.adopted.salvageRef} (${align.salvage.adopted.sha})`,
+    );
+  for (const converted of align.salvage?.converted ?? [])
+    context.log(
+      `align: ${converted.salvageRef} was not a descendant of ${bundle.agentBranch}; kept ${converted.orphanSha} at ${converted.orphanRef}`,
     );
   bringBranches(slot, mainDir, [integration, bundle.agentBranch]);
   try {

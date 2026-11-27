@@ -4,6 +4,7 @@ export {
   deleteOrphanRefs,
   originSha,
   orphanRefFor,
+  salvageRefFor,
 } from "./align-ticket-branch.ts";
 export type { ClaimedJob, Holding, WorkerApi } from "./api.ts";
 export { createWorkerApi } from "./api.ts";

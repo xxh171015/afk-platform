@@ -1034,7 +1034,9 @@ describe("a spec-cleanup task", () => {
     gitOrThrow(repo.dir, ["branch", branch]);
     const sha = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
     const orphan = `refs/afk/orphan/${branch}/${sha}`;
+    const salvage = `refs/afk/salvage/${branch}/1-1`;
     gitOrThrow(repo.dir, ["update-ref", orphan, sha]);
+    gitOrThrow(repo.dir, ["update-ref", salvage, sha]);
     try {
       await runHostTask(
         { adapter: recorder(), repoRef: ref, localRepos: [repo.dir] },
@@ -1046,6 +1048,9 @@ describe("a spec-cleanup task", () => {
       );
       expect(
         git(repo.dir, ["show-ref", "--verify", "--quiet", orphan]).code,
+      ).not.toBe(0);
+      expect(
+        git(repo.dir, ["show-ref", "--verify", "--quiet", salvage]).code,
       ).not.toBe(0);
     } finally {
       repo.cleanup();
