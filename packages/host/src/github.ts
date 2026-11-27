@@ -40,7 +40,13 @@ const READ: TokenPermissions = {
   statuses: "read",
 };
 const BRANCH: TokenPermissions = { contents: "read" };
-const ISSUES_WRITE: TokenPermissions = { issues: "write" };
+// GitHub Apps cannot POST /issues/{n}/comments on a pull request with only issues:write
+// (403 Resource not accessible by integration). pull_requests:write is required too.
+// Seen on afk-platform PR 379 during #377.
+const ISSUES_WRITE: TokenPermissions = {
+  issues: "write",
+  pull_requests: "write",
+};
 
 interface RawPull {
   number: number;

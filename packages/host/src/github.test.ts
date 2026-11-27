@@ -641,7 +641,7 @@ describe("upsertPlatformComment", () => {
       github.tokensIssued.some(
         (row) =>
           JSON.stringify(row.permissions) ===
-          JSON.stringify({ issues: "write" }),
+          JSON.stringify({ issues: "write", pull_requests: "write" }),
       ),
     ).toBe(true);
   });
