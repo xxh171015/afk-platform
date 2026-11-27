@@ -1,21 +1,15 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   AFK_OUT_RESULT_FILE,
   AFK_OUT_RESULT_MAX_BYTES,
   type AgentRunner,
   type AgentRunResult,
-  git,
   lastAssistantFromCursorLine,
   recoverStructuredOutput,
   resultBlock,
 } from "@afk/pipeline";
+import { commitsOnBranch, slotWorktreesClean } from "../slot-worktree.ts";
 
 type OutputSchema = Parameters<typeof recoverStructuredOutput>[0];
 
@@ -32,31 +26,6 @@ export const RECOVER_AFTER_EXIT_STAGES = new Set([
   "final-tidy",
   "update-branch",
 ]);
-
-function slotWorktreeClean(slotDir: string): boolean {
-  const places = [slotDir];
-  const worktrees = join(slotDir, ".sandcastle", "worktrees");
-  if (existsSync(worktrees)) {
-    for (const name of readdirSync(worktrees))
-      places.push(join(worktrees, name));
-  }
-  return places.every((place) => {
-    const status = git(place, ["status", "--porcelain"]);
-    return status.code === 0 && status.stdout.trim() === "";
-  });
-}
-
-function commitsOnBranch(
-  slotDir: string,
-  baseSha: string,
-  branch: string,
-): string[] {
-  if (git(slotDir, ["rev-parse", "--verify", "--quiet", branch]).code !== 0)
-    return [];
-  return git(slotDir, ["rev-list", "--reverse", `${baseSha}..${branch}`])
-    .stdout.split("\n")
-    .filter(Boolean);
-}
 
 function parseResultFile(resultDir: string): unknown | undefined {
   const path = join(resultDir, AFK_OUT_RESULT_FILE);
@@ -118,7 +87,7 @@ export function recoverAfterAbnormalExit<Output>(input: {
 
   let commits = result.commits;
   if (input.slotDir !== undefined) {
-    if (!slotWorktreeClean(input.slotDir)) return { kind: "job-failure" };
+    if (!slotWorktreesClean(input.slotDir)) return { kind: "job-failure" };
 
     const status =
       output && typeof output === "object" && "status" in output
@@ -144,7 +113,9 @@ export function recoverAfterAbnormalExit<Output>(input: {
     if (input.baseSha === undefined || input.branch === undefined) {
       return { kind: "job-failure" };
     }
-    commits = commitsOnBranch(input.slotDir, input.baseSha, input.branch);
+    commits = commitsOnBranch(input.slotDir, input.branch, input.baseSha).map(
+      (commit) => commit.sha,
+    );
     const hasCommits = commits.length > 0 || Boolean(input.inherited);
     if (status === "done" && input.requireCommit && !hasCommits) {
       return { kind: "job-failure" };

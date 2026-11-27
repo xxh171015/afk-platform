@@ -14,6 +14,11 @@ import { join } from "node:path";
 import { git, gitOrThrow, hasRef, isAncestor } from "@afk/pipeline";
 import { parseTicketBranch } from "@afk/shared";
 import { orphanRefFor, salvageRefFor } from "./align-ticket-branch.ts";
+import {
+  commitsOnBranch,
+  slotSafeGit,
+  slotWorktreePlaces,
+} from "./slot-worktree.ts";
 
 // Slots: every task gets its own throwaway clone of the repo, so whatever an agent breaks, it breaks in its own
 // copy (docs/design.md「Git 操作规范」). The number of slots is the worker's concurrency limit (GLOSSARY: Slot).
@@ -73,12 +78,6 @@ export function processAlive(pid: number): boolean {
     return errnoCode(error) === "EPERM"; // exists, just not ours
   }
 }
-
-// The clone is writable from inside the sandbox, so its own .git/config is not to be trusted: no filesystem
-// monitor, no hooks and no external diff or text conversion programs may run on the host because of it.
-const SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
-const safeGit = (clone: string, args: string[]) =>
-  git(clone, [...SAFE, ...args]);
 
 export class SlotManager {
   private readonly options: SlotManagerOptions;
@@ -383,7 +382,10 @@ function inspectSlotRefs(input: {
     `refs/heads/${input.defaultBranch ?? "main"}`,
     ...(input.integration ? [`refs/heads/${input.integration}`] : []),
   ]);
-  const refs = safeGit(input.slotClone, ["for-each-ref", "--format=%(refname)"])
+  const refs = slotSafeGit(input.slotClone, [
+    "for-each-ref",
+    "--format=%(refname)",
+  ])
     .stdout.split("\n")
     .filter((ref) => ref && !ref.startsWith("refs/remotes/"));
   const extraRefs = refs.filter((ref) => !expected.has(ref));
@@ -468,17 +470,11 @@ export function retrieveResult(input: {
 // (made visible with intent-to-add; the clone is thrown away afterwards), for the clone and every worktree
 // Sandcastle left inside it. Nothing here runs programs configured by the clone.
 function uncommittedChanges(clone: string): string | undefined {
-  const places = [clone];
-  const worktrees = join(clone, ".sandcastle", "worktrees");
-  if (existsSync(worktrees)) {
-    for (const name of readdirSync(worktrees))
-      places.push(join(worktrees, name));
-  }
   const parts: string[] = [];
-  for (const place of places) {
-    if (!safeGit(place, ["status", "--porcelain"]).stdout.trim()) continue;
-    safeGit(place, ["add", "--intent-to-add", "--all"]);
-    const diff = safeGit(place, [
+  for (const place of slotWorktreePlaces(clone)) {
+    if (!slotSafeGit(place, ["status", "--porcelain"]).stdout.trim()) continue;
+    slotSafeGit(place, ["add", "--intent-to-add", "--all"]);
+    const diff = slotSafeGit(place, [
       "diff",
       "HEAD",
       "--binary",
@@ -498,18 +494,12 @@ export function latestSalvageDiffFile(ref: string): string {
   return `latest-${ref.replaceAll("/", "-")}.diff`;
 }
 
-function commitsOnBranch(
+function salvageCommits(
   mainClone: string,
   ref: string,
   integration?: string,
 ): SalvageCommit[] {
-  if (
-    git(mainClone, ["rev-parse", "--verify", "--quiet", `refs/heads/${ref}`])
-      .code !== 0
-  ) {
-    return [];
-  }
-  const base =
+  const since =
     integration &&
     git(mainClone, [
       "rev-parse",
@@ -519,17 +509,7 @@ function commitsOnBranch(
     ]).code === 0
       ? integration
       : undefined;
-  const range = base ? `${base}..${ref}` : ref;
-  return git(mainClone, ["log", "--format=%H\t%s", "--reverse", range])
-    .stdout.split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const tab = line.indexOf("\t");
-      return {
-        sha: line.slice(0, tab < 0 ? line.length : tab),
-        subject: tab < 0 ? "" : line.slice(tab + 1),
-      };
-    });
+  return commitsOnBranch(mainClone, ref, since);
 }
 
 // An agent-stage job that failed (not recovered-after-exit): take the ticket branch back now, and keep
@@ -554,7 +534,7 @@ export function salvageFailedSlot(input: {
   });
   if (taken.error)
     input.log?.(`could not take back ${input.task.ref} (${taken.error})`);
-  const commits = commitsOnBranch(
+  const commits = salvageCommits(
     input.mainClone,
     input.task.ref,
     input.task.integration,
