@@ -167,6 +167,20 @@ export interface Bundle {
         body: string;
       }[]
     | null;
+  // rework: this repo's submitted Review comments for the active Change request. Null on other stages.
+  reviewComments: {
+    changeRequest: number;
+    currentHead: string;
+    comments: {
+      id: string;
+      writtenOn: string;
+      path: string | null;
+      side?: "old" | "new" | null;
+      lines?: number[];
+      excerpt?: string;
+      body: string;
+    }[];
+  } | null;
   // After handback, the next implement job resolves the resume stage from the remote tip.
   handbackResolve?: boolean;
 }
@@ -332,6 +346,93 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
       await recallGateTestCases(pool, row.test_cases_hash),
     ),
   ];
+}
+
+async function wrapUpAgentBranch(
+  pool: pg.Pool,
+  final: { specId: number; repoId: number; step: string },
+  namespace: string | null,
+): Promise<string> {
+  const names = branchNames(namespace);
+  const specDisplay = formatDisplayId("spec", final.specId);
+  const throughRework =
+    final.step === "rework" ||
+    ((final.step === "recheck" || final.step === "final-merge") &&
+      (
+        await pool.query(
+          `SELECT 1 FROM runs r
+           JOIN finalizations f ON f.spec_id = r.spec_id AND f.repo_id = r.repo_id
+           WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.ticket_id IS NULL
+             AND r.stage = 'rework' AND r.job_id > f.job_floor
+           LIMIT 1`,
+          [final.specId, final.repoId],
+        )
+      ).rowCount);
+  if (throughRework) {
+    const number = await pool.query<{ n: number | string | null }>(
+      `SELECT COALESCE(
+         (SELECT number FROM change_requests WHERE spec_id = $1 AND state = 'active' LIMIT 1),
+         (SELECT max(number) FROM change_requests WHERE spec_id = $1)
+       ) AS n`,
+      [final.specId],
+    );
+    const k = Number(number.rows[0]?.n);
+    if (Number.isInteger(k) && k >= 1) return names.rework(specDisplay, k);
+  }
+  return names.final(specDisplay);
+}
+
+async function reviewCommentsContextOf(
+  pool: pg.Pool,
+  specId: number,
+  repoId: number,
+): Promise<Bundle["reviewComments"]> {
+  const found = await pool.query<{
+    id: number;
+    path: string | null;
+    side: string | null;
+    line_start: number | null;
+    line_end: number | null;
+    excerpt: string | null;
+    body: string;
+    written_on: string;
+    current_head: string;
+    number: number;
+  }>(
+    `SELECT c.id, c.path, c.side, c.line_start, c.line_end, c.excerpt, c.body,
+            r.head_sha AS written_on, p.head_sha AS current_head, cr.number
+     FROM review_comments c
+     JOIN pull_requests p ON p.id = c.pull_request_id
+     JOIN review_revisions r ON r.id = c.revision_id
+     JOIN change_requests cr ON cr.id = c.change_request_id
+     WHERE c.spec_id = $1 AND p.repo_id = $2 AND c.state = 'submitted'
+       AND cr.state = 'active'
+     ORDER BY c.id`,
+    [specId, repoId],
+  );
+  if (found.rows.length === 0) return null;
+  return {
+    changeRequest: found.rows[0].number,
+    currentHead: found.rows[0].current_head,
+    comments: found.rows.map((row) => {
+      const comment: NonNullable<Bundle["reviewComments"]>["comments"][number] =
+        {
+          id: formatDisplayId("comment", row.id),
+          writtenOn: row.written_on,
+          path: row.path,
+          body: row.body,
+        };
+      if (row.side === "old" || row.side === "new") comment.side = row.side;
+      if (row.line_start != null) {
+        comment.lines =
+          row.line_end != null && row.line_end !== row.line_start
+            ? [row.line_start, row.line_end]
+            : [row.line_start];
+      }
+      if (row.excerpt) comment.excerpt = row.excerpt;
+      return comment;
+    }),
+  };
 }
 
 async function uncertaintiesOf(
@@ -609,6 +710,7 @@ export async function buildBundle(
     ),
     recheck: recheckOf(job.payload),
     uncertainties: null,
+    reviewComments: null,
     ...(job.payload.handbackResolve === true
       ? { handbackResolve: true as const }
       : {}),
@@ -687,9 +789,7 @@ async function buildFinalBundle(
     domain: domainOf(row),
     integrationBranch:
       branches.find((b) => b.repoId === row.repo_id)?.branch ?? null,
-    agentBranch: branchNames(row.branch_namespace).final(
-      formatDisplayId("spec", row.spec_id),
-    ),
+    agentBranch: await wrapUpAgentBranch(pool, final, row.branch_namespace),
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: [],
     contracts: [],
@@ -726,6 +826,10 @@ async function buildFinalBundle(
     ),
     recheck: recheckOf(job.payload),
     uncertainties: await uncertaintiesOf(pool, final.specId),
+    reviewComments:
+      final.step === "rework"
+        ? await reviewCommentsContextOf(pool, final.specId, final.repoId)
+        : null,
   };
 }
 
@@ -836,6 +940,7 @@ async function buildUpdateBranchBundle(
     ),
     recheck: recheckOf(job.payload),
     uncertainties: null,
+    reviewComments: null,
   };
 }
 
@@ -936,5 +1041,6 @@ async function buildLocateBundle(
     ),
     recheck: null,
     uncertainties: null,
+    reviewComments: null,
   };
 }

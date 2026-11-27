@@ -33,6 +33,7 @@ export interface FakeReview {
 }
 
 export interface FakeComment {
+  id?: number;
   user: string;
   type?: "User" | "Bot";
   body: string;
@@ -57,6 +58,7 @@ export class FakeGitHub {
   refuseReady: "status" | "error" | false = false; // how a mark-ready is refused: HTTP 403, or a GraphQL error
   refuseBranchDeletes = false; // answer 403 to a branch delete, as a token without contents:write would get
   refuseMerge = false; // answer 403 to PUT .../merge
+  refuseIssueComments = false; // answer 403 to POST/PATCH issue comments
   hideUser = false; // answer 403 to GET /user, as an installation token often would
   tokenLogin = "afk-platform[bot]";
   tokenType: "User" | "Bot" = "Bot";
@@ -70,6 +72,7 @@ export class FakeGitHub {
     pull_requests: "write",
     checks: "read",
     statuses: "read",
+    issues: "write",
     metadata: "read",
   };
   // The files on the repo's default branch, by path.
@@ -86,6 +89,7 @@ export class FakeGitHub {
   private readonly reviews = new Map<number, FakeReview[]>();
   private readonly issueComments = new Map<number, FakeComment[]>();
   private readonly pullComments = new Map<number, FakeComment[]>();
+  private nextIssueCommentId = 1;
   private readonly checks = new Map<string, FakeCheck[]>();
   private readonly statuses = new Map<string, string>();
   private readonly commits = new Map<string, FakeCommit>();
@@ -160,11 +164,20 @@ export class FakeGitHub {
   addReview(number: number, review: FakeReview): void {
     this.reviews.set(number, [...(this.reviews.get(number) ?? []), review]);
   }
-  addIssueComment(number: number, comment: FakeComment): void {
+  addIssueComment(number: number, comment: FakeComment): FakeComment {
+    const row = {
+      ...comment,
+      id: comment.id ?? this.nextIssueCommentId++,
+    };
     this.issueComments.set(number, [
       ...(this.issueComments.get(number) ?? []),
-      comment,
+      row,
     ]);
+    return row;
+  }
+
+  issueCommentsOf(number: number): FakeComment[] {
+    return [...(this.issueComments.get(number) ?? [])];
   }
   addPullComment(number: number, comment: FakeComment): void {
     this.pullComments.set(number, [
@@ -425,18 +438,40 @@ export class FakeGitHub {
       });
     }
     const issueComments = /^\/issues\/(\d+)\/comments$/.exec(rest);
-    if (req.method === "GET" && issueComments)
+    if (issueComments && req.method === "GET")
       return this.conditional(
         req,
         res,
         this.page(
           url,
-          (this.issueComments.get(Number(issueComments[1])) ?? []).map((c) => ({
-            user: { login: c.user, type: c.type ?? "User" },
-            body: c.body,
-          })),
+          (this.issueComments.get(Number(issueComments[1])) ?? []).map((c) =>
+            this.renderIssueComment(c),
+          ),
         ),
       );
+    if (issueComments && req.method === "POST") {
+      if (this.refuseIssueComments)
+        return this.json(res, 403, { message: "Resource not accessible" });
+      const created = this.addIssueComment(Number(issueComments[1]), {
+        user: this.tokenLogin,
+        type: this.tokenType,
+        body: String(body.body ?? ""),
+      });
+      return this.json(res, 201, this.renderIssueComment(created));
+    }
+    const oneIssueComment = /^\/issues\/comments\/(\d+)$/.exec(rest);
+    if (oneIssueComment && req.method === "PATCH") {
+      if (this.refuseIssueComments)
+        return this.json(res, 403, { message: "Resource not accessible" });
+      const id = Number(oneIssueComment[1]);
+      for (const list of this.issueComments.values()) {
+        const found = list.find((c) => c.id === id);
+        if (!found) continue;
+        found.body = String(body.body ?? found.body);
+        return this.json(res, 200, this.renderIssueComment(found));
+      }
+      return this.json(res, 404, { message: "Not Found" });
+    }
     const pullComments = /^\/pulls\/(\d+)\/comments$/.exec(rest);
     if (req.method === "GET" && pullComments)
       return this.conditional(
@@ -545,6 +580,14 @@ export class FakeGitHub {
       return res.end();
     }
     return this.json(res, 200, body, true);
+  }
+
+  private renderIssueComment(comment: FakeComment) {
+    return {
+      id: comment.id,
+      user: { login: comment.user, type: comment.type ?? "User" },
+      body: comment.body,
+    };
   }
 
   private render(pull: FakePull) {

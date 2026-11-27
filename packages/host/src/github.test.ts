@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
+import { REVIEW_NOTE_MARKER } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createGitHubAdapter } from "./github.ts";
 import { createAppTokenSource } from "./github-app.ts";
@@ -609,6 +610,69 @@ describe("humanComments", () => {
       body: "ci note",
     });
     expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(1);
+  });
+});
+
+describe("upsertPlatformComment", () => {
+  const marker = REVIEW_NOTE_MARKER;
+  const upsert = (body: string) =>
+    adapter().upsertPlatformComment({ repo, number: 1, marker, body });
+
+  it("creates an issue comment when none of the token user's comments has the marker", async () => {
+    await open();
+    github.addIssueComment(1, {
+      user: "alice",
+      body: `${marker}\nnot ours`,
+    });
+    const created = await upsert(`${marker}\n处理中`);
+    expect(created.id).toMatch(/^\d+$/);
+    expect(github.issueCommentsOf(1)).toEqual([
+      expect.objectContaining({
+        user: "alice",
+        body: `${marker}\nnot ours`,
+      }),
+      expect.objectContaining({
+        user: github.tokenLogin,
+        type: github.tokenType,
+        body: `${marker}\n处理中`,
+      }),
+    ]);
+    expect(
+      github.tokensIssued.some(
+        (row) =>
+          JSON.stringify(row.permissions) ===
+          JSON.stringify({ issues: "write", pull_requests: "write" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("updates the token user's marked comment instead of creating a second", async () => {
+    await open();
+    const first = await upsert(`${marker}\n处理中`);
+    const second = await upsert(`${marker}\n已处理`);
+    expect(second.id).toBe(first.id);
+    expect(github.issueCommentsOf(1)).toEqual([
+      expect.objectContaining({
+        id: Number(first.id),
+        body: `${marker}\n已处理`,
+      }),
+    ]);
+  });
+
+  it("does not count the platform comment as a human comment", async () => {
+    await open();
+    await upsert(`${marker}\n处理中`);
+    expect(
+      (await adapter().getPullRequest({ repo, number: 1 })).humanComments,
+    ).toBe(0);
+  });
+
+  it("throws a HostError when GitHub refuses to write issue comments", async () => {
+    await open();
+    github.refuseIssueComments = true;
+    const error = await upsert(`${marker}\n处理中`).catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error.status).toBe(403);
   });
 });
 

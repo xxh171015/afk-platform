@@ -1,4 +1,5 @@
 import {
+  chunkReviewRevisionResult,
   DEFAULT_DISK_WARN_GIB,
   type DiskLevel,
   diskLevel,
@@ -9,6 +10,7 @@ import {
   MAX_LOG_CHUNK_BYTES,
   occupiesSlot,
   PLANNING_COMMIT_JOB,
+  ReviewRevisionResultSchema,
   TRIAL_MERGE_JOB,
   tryParseRepoUrl,
 } from "@afk/shared";
@@ -116,7 +118,7 @@ export async function runWorker(
     );
     return next;
   };
-  const loop = async () => {
+  const loop = async (slotless = false) => {
     let lastDiskLevel: DiskLevel | undefined;
     while (!options.signal?.aborted && !options.drain?.aborted) {
       let job: ClaimedJob | null;
@@ -147,7 +149,7 @@ export async function runWorker(
             continue;
           }
         }
-        takeSlot = await decideTakeSlot();
+        takeSlot = slotless ? false : await decideTakeSlot();
         heldReservation = takeSlot && options.executor.slots?.idleCount != null;
         job = await claim(takeSlot);
       } catch (error) {
@@ -169,7 +171,11 @@ export async function runWorker(
       if (heldReservation && occupiesSlot(job.type)) reserved -= 1;
     }
   };
-  await Promise.all(Array.from({ length: options.concurrency ?? 1 }, loop));
+  // One extra loop only claims slotless jobs, so host-sync still runs when every slot is busy.
+  await Promise.all([
+    ...Array.from({ length: options.concurrency ?? 1 }, () => loop()),
+    loop(true),
+  ]);
   return { jobs };
 }
 
@@ -368,6 +374,18 @@ export async function processJob(
           }
         }
         host = { ...options.host, repoDir };
+      } else if (task.kind === "review-revision") {
+        const parsed = tryParseRepoUrl(task.repoUrl);
+        const creds = parsed
+          ? await withCredentials({ ...executor, api }, task.repoUrl)
+          : { repos: options.executor.repos };
+        const repoDir = await creds.repos.ensure(
+          task.repoName,
+          task.repoUrl,
+          task.defaultBranch,
+        );
+        await creds.repos.fetchObject(repoDir, task.repoUrl, task.headSha);
+        host = { ...options.host, repoDir };
       } else if (task.kind === "spec-cleanup") {
         host = {
           ...options.host,
@@ -382,8 +400,14 @@ export async function processJob(
       }
       const body = await runHostTask(host, task, log);
       if (lost.signal.aborted) return "abandoned";
-      if ((await handOver(options, job, body, log)) !== "held")
-        return "abandoned";
+      const payloads =
+        task.kind === "review-revision"
+          ? chunkReviewRevisionResult(ReviewRevisionResultSchema.parse(body))
+          : [body];
+      for (const payload of payloads) {
+        if ((await handOver(options, job, payload, log)) !== "held")
+          return "abandoned";
+      }
       log(`${job.type} ok`);
       return "completed";
     }

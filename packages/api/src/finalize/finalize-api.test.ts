@@ -1714,3 +1714,92 @@ describe("Tidy after wrap-up", () => {
     ]);
   });
 });
+
+describe("Rework wrap-up", () => {
+  async function toRework() {
+    await runningSpec([ticket("a")]);
+    await allTicketsDone();
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE payload->>'final' = 'true' AND state IN ('queued', 'running')",
+    );
+    await db.pool.query(
+      `UPDATE finalizations SET step = 'rework', state = 'active',
+         blocked_reason = NULL, auto_retried = false, retry_note = NULL,
+         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)`,
+    );
+    await db.pool.query(
+      `INSERT INTO jobs (type, payload, idempotency_key)
+       VALUES ('agent-run', '{"stage":"rework","specId":1,"repoId":1,"final":true}', 'S-1:repo-1:rework:1')`,
+    );
+  }
+
+  it("a done rework goes to final-merge", async () => {
+    await toRework();
+    await step("rework", { outcome: "done" });
+    expect(await fin()).toEqual([
+      { step: "final-merge", state: "active", blocked_reason: null },
+    ]);
+    expect((await claim())?.payload.stage).toBe("final-merge");
+  });
+
+  it("Rechecks a rework that hit existing tests", async () => {
+    await toRework();
+    await step("rework", {
+      outcome: "done",
+      run: {
+        recheck: {
+          hit: true,
+          paths: ["src/a.test.ts"],
+          fromSha: "aaa111",
+          toSha: "bbb222",
+        },
+      },
+    });
+    const rec = (await claim()) as Claimed;
+    expect(rec.payload.stage).toBe("recheck");
+    expect(rec.payload).toMatchObject({
+      fromSha: "aaa111",
+      toSha: "bbb222",
+      paths: ["src/a.test.ts"],
+    });
+  });
+
+  it("retries a rework timeout once", async () => {
+    await toRework();
+    await step("rework", { outcome: "timeout" });
+    await step("rework", { outcome: "timeout" });
+    expect(await fin()).toEqual([
+      { step: "rework", state: "blocked", blocked_reason: "timeout" },
+    ]);
+  });
+
+  it("a merged rework wrap-up skips Tidy even when tidy is wanted", async () => {
+    await runningSpec([ticket("a")]);
+    await allTicketsDone();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE state IN ('queued', 'running')",
+    );
+    await db.pool.query(
+      `UPDATE finalizations SET step = 'rework', state = 'active',
+         blocked_reason = NULL, auto_retried = false, retry_note = NULL,
+         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)`,
+    );
+    await db.pool.query(
+      `INSERT INTO jobs (type, payload, idempotency_key)
+       VALUES ('agent-run', '{"stage":"rework","specId":1,"repoId":1,"final":true}', 'S-1:repo-1:rework:1')`,
+    );
+    await step("rework", { outcome: "done" });
+    await step("final-merge", { outcome: "merged", headSha: "rewound" });
+    expect(await fin()).toEqual([
+      { step: "final-merge", state: "done", blocked_reason: null },
+    ]);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT state FROM jobs WHERE payload->>'stage' = 'final-tidy'",
+        )
+      ).rows.every((row: { state: string }) => row.state !== "queued"),
+    ).toBe(true);
+  });
+});

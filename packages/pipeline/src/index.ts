@@ -10,6 +10,7 @@ export type {
   LocateOutput,
   ResultFix,
   ReviewOutput,
+  ReworkOutput,
   TidyOutput,
 } from "./agent.ts";
 export {
@@ -31,11 +32,13 @@ export {
   RESULT_REPAIR_IDLE_SECONDS,
   RESULT_REPAIR_WALL_CLOCK_MS,
   ReviewOutputSchema,
+  ReworkOutputSchema,
   recoverStructuredOutput,
   resultSectionOf,
   reviewFindings,
   reviewOutputSchemaFor,
   reviewSources,
+  reworkOutputSchema,
   StandardsReviewOutputSchema,
   sourcesCiteAgentsMd,
   TidyOutputSchema,

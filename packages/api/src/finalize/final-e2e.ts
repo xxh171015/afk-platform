@@ -60,6 +60,13 @@ export function readFinalE2ePayload(
   return { specId, ticketId, round, stage };
 }
 
+export async function deleteFinalE2e(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<void> {
+  await client.query("DELETE FROM final_e2e WHERE spec_id = $1", [specId]);
+}
+
 const roundOf = async (client: pg.PoolClient, specId: number) =>
   (
     await client.query<Round>(
@@ -167,6 +174,7 @@ export async function settleFinalization(
   const changed = await client.query(
     `SELECT 1 FROM runs WHERE spec_id = $1 AND ticket_id IS NULL AND (
        (stage = 'final-fix' AND result = 'done')
+       OR (stage = 'rework' AND result = 'done')
        OR (stage = 'tidy-merge' AND result = 'merged')
      ) LIMIT 1`,
     [specId],

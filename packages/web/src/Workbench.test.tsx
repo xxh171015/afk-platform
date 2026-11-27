@@ -32,6 +32,13 @@ const empty = {
   status: emptyWorkbench.status,
 };
 
+const emptyReviewQueue = {
+  waitingForYou: [] as unknown[],
+  inProgress: [] as unknown[],
+  inRework: [] as unknown[],
+  readyToMerge: [] as unknown[],
+};
+
 const onboarding = {
   "GET /projects": () => ({
     json: { projects: [{ id: 1, name: "shop", feishuChatId: null }] },
@@ -39,6 +46,7 @@ const onboarding = {
   "GET /version": () => ({
     json: { platformVersion: "0.2.0", skillsSha: "x", platformCommit: "abc" },
   }),
+  "GET /review-queue": () => ({ json: emptyReviewQueue }),
 };
 
 describe("the workbench", () => {
@@ -97,6 +105,37 @@ describe("the workbench", () => {
       <Workbench />,
       fakeServer({
         ...onboarding,
+        "GET /review-queue": () => ({
+          json: {
+            waitingForYou: [
+              {
+                spec: {
+                  id: 5,
+                  displayId: "S-5",
+                  title: "Ready",
+                  type: "feature",
+                  state: "awaiting-review",
+                  project: "shop",
+                },
+                repos: ["backend"],
+                hostKind: "github",
+                pullRequestCount: 2,
+                waitingSince: "2026-11-01T10:00:00.000Z",
+                additions: 0,
+                deletions: 0,
+                viewedCount: 0,
+                filesCount: 1,
+                ci: "none",
+                conflictsWithDefault: false,
+                autoMergeLine: null,
+                riskTags: [],
+              },
+            ],
+            inProgress: [],
+            inRework: [],
+            readyToMerge: [],
+          },
+        }),
         "GET /workbench": () => ({
           json: {
             waiting: {
@@ -236,12 +275,9 @@ describe("the workbench", () => {
     expect(running.getByText("偏慢")).toBeTruthy();
 
     const review = within(screen.getByTestId("quadrant-等你验收"));
-    expect(review.getByText("S-5").closest("a")?.getAttribute("href")).toBe(
-      "/specs/5/delivery",
-    );
-    expect(review.getByText(/2 个 PR/)).toBeTruthy();
-    expect(review.getByText(/验收标准/).textContent).toMatch(/1\/3/);
-    expect(review.getByText("待验收").title).toBe("awaiting-review");
+    expect(
+      review.getByText("1 个要看").closest("a")?.getAttribute("href"),
+    ).toBe("/review");
 
     const done = within(screen.getByTestId("quadrant-最近完成"));
     expect(done.getByText("S-1").closest("a")?.getAttribute("href")).toBe(
@@ -302,6 +338,37 @@ describe("the workbench", () => {
       <Workbench />,
       fakeServer({
         ...onboarding,
+        "GET /review-queue": () => ({
+          json: {
+            waitingForYou: [],
+            inProgress: [],
+            inRework: [],
+            readyToMerge: [
+              {
+                spec: {
+                  id: 5,
+                  displayId: "S-5",
+                  title: "Ready",
+                  type: "feature",
+                  state: "awaiting-review",
+                  project: "shop",
+                },
+                repos: ["backend"],
+                hostKind: "gitlab",
+                pullRequestCount: 2,
+                waitingSince: "2026-11-01T10:00:00.000Z",
+                additions: 0,
+                deletions: 0,
+                viewedCount: 2,
+                filesCount: 2,
+                ci: "none",
+                conflictsWithDefault: false,
+                autoMergeLine: null,
+                riskTags: [],
+              },
+            ],
+          },
+        }),
         "GET /workbench": () => ({
           json: {
             waiting: emptyWaiting,
@@ -343,7 +410,7 @@ describe("the workbench", () => {
         }),
       }),
     );
-    expect(await screen.findByText(/2 个 MR/)).toBeTruthy();
+    expect(await screen.findByText("另有 1 个待合并")).toBeTruthy();
   });
 
   it("does not mark a running ticket 偏慢 when there is no peer history", async () => {

@@ -750,6 +750,174 @@ describe("Recheck range after update-branch and merge-fix", () => {
     });
   });
 
+  it("rework: cuts from the integration tip, stamps trailers, and treats Recheck like final-fix", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    originAndSlot(["spec/s"]);
+    const comments = {
+      changeRequest: 2,
+      currentHead: "tip",
+      comments: [
+        {
+          id: "C-12",
+          writtenOn: "tip",
+          path: "src/a.ts",
+          body: "flip the assertion",
+        },
+      ],
+    };
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      expect(ctx.stage).toBe("rework");
+      expect(ctx.prompt).toContain("/context/review-comments.json");
+      expect(JSON.parse(ctx.context("review-comments.json") as string)).toEqual(
+        comments,
+      );
+      return {
+        files: {
+          "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n',
+        },
+        output: {
+          status: "done",
+          summary: "flipped",
+          comments: [{ id: "C-12", outcome: "addressed", reply: "flipped" }],
+          acceptance: {},
+          decisions: [],
+        },
+      };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "rework",
+          ticket: null,
+          agentBranch: "agent/S-12-rework-2",
+          integrationBranch: "spec/s",
+          reviewComments: comments,
+        }),
+      ),
+      repo.dir,
+      slot("agent/S-12-rework-2"),
+      align,
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(outcome.comments).toEqual([
+      { id: "C-12", outcome: "addressed", reply: "flipped" },
+    ]);
+    expect(body("agent/S-12-rework-2")).toContain("Spec: S-12");
+    expect(body("agent/S-12-rework-2")).toContain("Run: R-9");
+    expect(body("agent/S-12-rework-2")).not.toContain("Ticket:");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: true,
+      paths: ["src/a.test.ts"],
+    });
+  });
+
+  it("rework: a result that skips a comment id is invalid-output", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.ts": "export const n = 1;\n",
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    originAndSlot(["spec/s"]);
+    const runner = new FakeAgentRunner(slotDir, async () => ({
+      files: { "src/a.ts": "export const n = 2;\n" },
+      output: {
+        status: "done",
+        summary: "changed",
+        comments: [{ id: "C-12", outcome: "addressed", reply: "only one" }],
+        acceptance: {},
+        decisions: [],
+      },
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "rework",
+          ticket: null,
+          agentBranch: "agent/S-12-rework-1",
+          integrationBranch: "spec/s",
+          reviewComments: {
+            changeRequest: 1,
+            currentHead: "tip",
+            comments: [
+              { id: "C-12", writtenOn: "tip", path: "src/a.ts", body: "one" },
+              { id: "C-14", writtenOn: "tip", path: null, body: "two" },
+            ],
+          },
+        }),
+      ),
+      repo.dir,
+      slot("agent/S-12-rework-1"),
+      align,
+    );
+    expect(outcome.outcome).toBe("invalid-output");
+  });
+
+  it("rework: declined comments with no commits are still done", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.ts": "export const n = 1;\n",
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    originAndSlot(["spec/s"]);
+    const runner = new FakeAgentRunner(slotDir, async () => ({
+      output: {
+        status: "done",
+        summary: "left protected path alone",
+        comments: [
+          {
+            id: "C-12",
+            outcome: "declined",
+            reply: "protected path; needs an appended ticket",
+          },
+        ],
+        acceptance: {},
+        decisions: [
+          {
+            kind: "conflict",
+            text: "comment asked to edit a protected path",
+          },
+        ],
+      },
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "rework",
+          ticket: null,
+          agentBranch: "agent/S-12-rework-1",
+          integrationBranch: "spec/s",
+          reviewComments: {
+            changeRequest: 1,
+            currentHead: "tip",
+            comments: [
+              {
+                id: "C-12",
+                writtenOn: "tip",
+                path: ".github/workflows/ci.yml",
+                body: "always run",
+              },
+            ],
+          },
+        }),
+      ),
+      repo.dir,
+      slot("agent/S-12-rework-1"),
+      align,
+    );
+    expect(outcome.outcome).toBe("done");
+    expect(
+      git(repo.dir, ["rev-parse", "--verify", "agent/S-12-rework-1"]).code,
+    ).toBe(0);
+  });
+
   it("final-fix Recheck still starts at the pre-run tip", async () => {
     repo = makeRepo({
       ".sandcastle/gates.yaml": GATES,

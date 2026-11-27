@@ -12,6 +12,7 @@ const NEEDED: Required<TokenPermissions> = {
   pull_requests: "write",
   checks: "read",
   statuses: "read",
+  issues: "write",
 };
 
 const NEEDED_READ: TokenPermissions = {

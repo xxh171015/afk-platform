@@ -206,10 +206,10 @@ export class RepoStore {
   }
 
   hasObject(dir: string, sha: string): boolean {
-    return git(dir, ["cat-file", "-t", sha]).stdout.trim() === "commit";
+    return git(dir, ["cat-file", "-t", sha]).code === 0;
   }
 
-  // A planning commit may live only on plan/*, which ensure() does not fetch.
+  // A SHA ensure() does not follow (a planning commit on plan/*, a PR head that has moved on).
   async fetchObject(dir: string, url: string, sha: string): Promise<void> {
     if (this.hasObject(dir, sha)) return;
     // origin may just not have it under that name; a fetch that timed out says so instead
@@ -229,7 +229,7 @@ export class RepoStore {
       if (this.hasObject(dir, sha)) return;
     }
     throw new Error(
-      `planning commit ${sha} is not on origin${/timed out/.test(failure) ? ` (${failure})` : ""}`,
+      `object ${sha} is not on origin${/timed out/.test(failure) ? ` (${failure})` : ""}`,
     );
   }
 }

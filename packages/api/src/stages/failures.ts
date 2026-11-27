@@ -21,6 +21,7 @@ import {
   enqueueOpenPr,
   enqueuePrDraft,
   enqueuePrReady,
+  enqueueReviewNote,
   enqueueSpecCleanup,
   inSeconds,
   openPrKeyPrefix,
@@ -28,13 +29,18 @@ import {
   type PrReadyPayload,
   prDraftKeyPrefix,
   prReadyKeyPrefix,
+  type ReviewNotePayload,
   readOpenPrPayload,
   readPrDraftPayload,
   readPrReadyPayload,
+  readReviewNotePayload,
+  readReviewRevisionPayload,
   readSpecCleanupPayload,
+  reviewNoteKeyPrefix,
   type SpecCleanupPayload,
   specCleanupKeyPrefix,
 } from "../host/host-jobs.ts";
+import { reviewRevisionFailed } from "../host/review-revision.ts";
 import { updateBranchJobFailed } from "../host/update-branch.ts";
 import { finalJobKeyPrefix, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import {
@@ -291,6 +297,13 @@ export async function recordJobFailure(
   if (ready) return prReadyFailed(client, ready, now);
   const draft = readPrDraftPayload(job);
   if (draft) return prDraftFailed(client, draft, now);
+  const review = readReviewRevisionPayload(job);
+  if (review) {
+    await reviewRevisionFailed(client, review, error);
+    return { status: "ignored" };
+  }
+  const reviewNote = readReviewNotePayload(job);
+  if (reviewNote) return reviewNoteFailed(client, reviewNote, now);
   const locate = await recordLocateJobFailure(client, job, error);
   if (locate.status !== "not-locate") {
     return locate.status === "ignored"
@@ -503,5 +516,18 @@ async function prDraftFailed(
   const failures = await failuresOf(client, prDraftKeyPrefix(read), 0);
   if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
   await enqueuePrDraft(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
+  return { status: "requeued", failures };
+}
+
+// Writing the review-notes comment failed. Tried again a minute later, three times in all.
+// After that the job stays failed; wrap-up is not blocked (the review page shows the miss).
+async function reviewNoteFailed(
+  client: pg.PoolClient,
+  read: ReviewNotePayload,
+  now: Date,
+): Promise<FailureOutcome> {
+  const failures = await failuresOf(client, reviewNoteKeyPrefix(read), 0);
+  if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
+  await enqueueReviewNote(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
   return { status: "requeued", failures };
 }

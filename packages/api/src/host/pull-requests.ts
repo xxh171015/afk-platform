@@ -7,6 +7,7 @@ import {
   MANUAL_MERGE_NOTE,
   parseDisplayId,
   parseMergePolicy,
+  REVIEW_NOTE_MARKER,
   REWORK_PR_MERGED_REASON,
   type SpecState,
   specTransition,
@@ -17,12 +18,19 @@ import {
 import type pg from "pg";
 import { z } from "zod";
 import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
-import { renderPackSection } from "../acceptance/pack-description.ts";
+import {
+  renderPackSection,
+  renderReviewNoteBody,
+} from "../acceptance/pack-description.ts";
 import { recordAutoMergeEvent } from "../events/auto-merge.ts";
-import { cancelTicketJobs } from "../jobs/stage-jobs.ts";
+import { cancelFinalJobs, cancelTicketJobs } from "../jobs/stage-jobs.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
 import { queueDueAutoMerges } from "./auto-merge.ts";
+import {
+  markActiveChangeRequestsDone,
+  supersedeActiveChangeRequests,
+} from "./change-requests.ts";
 import {
   type AutoMergePayload,
   enqueueHostSync,
@@ -36,6 +44,8 @@ import {
   type PatchPrBodyPayload,
   type PrDraftPayload,
   type PrReadyPayload,
+  type ReviewNotePayload,
+  type ReviewRevisionPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
   stopAutoMergeJobs,
@@ -43,6 +53,8 @@ import {
 } from "./host-jobs.ts";
 import { IDLE_TICKET_SQL } from "./idle-tickets.ts";
 import { mergeOrderOf } from "./merge-order.ts";
+import { enqueueReviewNotesForSpec } from "./review-note.ts";
+import { enqueueReviewRevisionsForSpec } from "./review-revision.ts";
 import { dropPotentialConflicts } from "./trial-merge.ts";
 import {
   applyDefaultShas,
@@ -113,6 +125,22 @@ export type HostTask =
       number: number;
       expectedHeadSha: string;
       section: string;
+    }
+  | {
+      kind: "review-revision";
+      pullId: number;
+      repoUrl: string;
+      repoName: string;
+      defaultBranch: string;
+      headSha: string;
+      previousHeadSha: string | null;
+    }
+  | {
+      kind: "review-note";
+      repoUrl: string;
+      number: number;
+      marker: string;
+      body: string;
     };
 
 const PullFacts = {
@@ -262,7 +290,10 @@ async function finishOpeningWithExistingPulls(
     specId,
     next.state,
   ]);
+  await markActiveChangeRequestsDone(client, specId);
   await markMergedWhenAllAre(client, specId);
+  await enqueueReviewRevisionsForSpec(client, specId);
+  await enqueueReviewNotesForSpec(client, specId);
   const projectId = await projectOf(client, specId);
   if (projectId !== undefined) await enqueueHostSync(client, projectId);
 }
@@ -307,8 +338,85 @@ export async function buildHostTask(
     | PrDraftPayload
     | PatchPrBodyPayload
     | IndexPrLinksPayload
-    | AutoMergePayload,
+    | AutoMergePayload
+    | ReviewRevisionPayload
+    | ReviewNotePayload,
 ): Promise<HostTask | undefined> {
+  if (job.type === "review-note") {
+    const { pullId } = payload as ReviewNotePayload;
+    const pull = (
+      await pool.query<{ url: string; number: number }>(
+        `SELECT r.url, p.number
+         FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+        [pullId],
+      )
+    ).rows[0];
+    if (!pull) return undefined;
+    const comments = await pool.query<{
+      id: number;
+      change_request: number;
+      path: string | null;
+      side: "old" | "new" | null;
+      line_start: number | null;
+      line_end: number | null;
+      body: string;
+      state: "submitted" | "addressed" | "declined";
+      reply: string | null;
+    }>(
+      `SELECT c.id, cr.number AS change_request, c.path, c.side, c.line_start,
+              c.line_end, c.body, c.state, c.reply
+       FROM review_comments c
+       JOIN change_requests cr ON cr.id = c.change_request_id
+       WHERE c.pull_request_id = $1 AND c.state <> 'draft'
+       ORDER BY c.id`,
+      [pullId],
+    );
+    return {
+      kind: "review-note",
+      repoUrl: pull.url,
+      number: pull.number,
+      marker: REVIEW_NOTE_MARKER,
+      body: renderReviewNoteBody(
+        comments.rows.map((row) => ({
+          displayId: formatDisplayId("comment", row.id),
+          changeRequest: row.change_request,
+          path: row.path,
+          side: row.side,
+          lineStart: row.line_start,
+          lineEnd: row.line_end,
+          body: row.body,
+          state: row.state,
+          reply: row.reply,
+        })),
+      ),
+    };
+  }
+  if (job.type === "review-revision") {
+    const { pullId, headSha, previousHeadSha } =
+      payload as ReviewRevisionPayload;
+    const pull = (
+      await pool.query<{
+        url: string;
+        name: string;
+        default_branch: string;
+      }>(
+        `SELECT r.url, r.name, r.default_branch
+         FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+        [pullId],
+      )
+    ).rows[0];
+    return pull
+      ? {
+          kind: "review-revision",
+          pullId,
+          repoUrl: pull.url,
+          repoName: pull.name,
+          defaultBranch: pull.default_branch,
+          headSha,
+          previousHeadSha,
+        }
+      : undefined;
+  }
   if (job.type === "auto-merge") {
     const { pullId, expectedHeadSha, specId } = payload as AutoMergePayload;
     const pull = (
@@ -538,6 +646,10 @@ async function specCleanupTask(
     "SELECT id, repo_id FROM tickets WHERE spec_id = $1 ORDER BY id",
     [specId],
   );
+  const requests = await pool.query<{ number: number }>(
+    "SELECT number FROM change_requests WHERE spec_id = $1 ORDER BY number",
+    [specId],
+  );
   const names = branchNames(spec.branch_namespace);
   const branches = repos.rows.flatMap((repo) => [
     { repoUrl: repo.url, branch: names.integration(spec.slug) },
@@ -555,6 +667,10 @@ async function specCleanupTask(
       repoUrl: repo.url,
       branch: names.update(formatDisplayId("spec", specId)),
     },
+    ...requests.rows.map((request) => ({
+      repoUrl: repo.url,
+      branch: names.rework(formatDisplayId("spec", specId), request.number),
+    })),
   ]);
   return {
     kind: "spec-cleanup",
@@ -803,8 +919,10 @@ export async function recordOpenPr(
       read.specId,
       next.state,
     ]);
+    await markActiveChangeRequestsDone(client, read.specId);
     // a pull request that was already merged when it was found (opened by an earlier try) may be the last one
     await markMergedWhenAllAre(client, read.specId);
+    await enqueueReviewRevisionsForSpec(client, read.specId);
   }
   if (pr.state === "merged")
     await enqueueIndexPrLinksIfMerged(client, {
@@ -833,7 +951,13 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
   if (!spec) return;
   if (spec.state === "reworking") {
     if (!pulls.rows.some((p) => p.state === "merged")) return;
-    await finishReworkingBecausePrMerged(client, specId);
+    await finishBecausePersonMergedDuringRework(client, specId, "reworking");
+    return;
+  }
+  if (spec.state === "finalizing") {
+    if (!(await everAwaitingReview(client, specId))) return;
+    if (!pulls.rows.some((p) => p.state === "merged")) return;
+    await finishBecausePersonMergedDuringRework(client, specId, "finalizing");
     return;
   }
   if (!["awaiting-review", "partially-merged"].includes(spec.state)) return;
@@ -873,11 +997,25 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
   }
 }
 
-async function finishReworkingBecausePrMerged(
+async function everAwaitingReview(
   client: pg.PoolClient,
   specId: number,
+): Promise<boolean> {
+  const found = await client.query(
+    `SELECT 1 FROM events
+     WHERE spec_id = $1 AND type = 'spec' AND to_state = 'awaiting-review'
+     LIMIT 1`,
+    [specId],
+  );
+  return (found.rowCount ?? 0) > 0;
+}
+
+async function finishBecausePersonMergedDuringRework(
+  client: pg.PoolClient,
+  specId: number,
+  from: SpecState,
 ) {
-  const next = specTransition("reworking", "all-prs-merged");
+  const next = specTransition(from, "all-prs-merged");
   if (!next.ok) throw new Error(next.reason);
   await client.query("SELECT set_config('afk.reason', $1, true)", [
     REWORK_PR_MERGED_REASON,
@@ -904,6 +1042,19 @@ async function finishReworkingBecausePrMerged(
     for (const id of cancelled)
       await cancelTicketJobs(client, id, REWORK_PR_MERGED_REASON);
   }
+  await cancelFinalJobs(client, specId, REWORK_PR_MERGED_REASON);
+  await client.query(
+    `UPDATE jobs SET state = 'failed', error = $2,
+       lease_owner = NULL, lease_expires_at = NULL
+     WHERE state IN ('queued', 'running')
+       AND type IN ('pr-draft', 'pr-ready', 'open-pr', 'patch-pr-body')
+       AND (
+         (payload->>'specId')::int = $1
+         OR (payload->>'pullId')::int IN (SELECT id FROM pull_requests WHERE spec_id = $1)
+       )`,
+    [specId, REWORK_PR_MERGED_REASON],
+  );
+  await supersedeActiveChangeRequests(client, specId);
   await dropPotentialConflicts(client, specId);
   await enqueueSpecCleanup(client, { specId });
 }

@@ -100,5 +100,6 @@ export function bundleFor(
     ticketReview: rest.ticketReview ?? "spec",
     stageModels: rest.stageModels ?? {},
     uncertainties: rest.uncertainties ?? null,
+    reviewComments: rest.reviewComments ?? null,
   };
 }

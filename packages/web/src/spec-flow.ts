@@ -131,6 +131,7 @@ export type FlowTab =
   | "description"
   | "tickets"
   | "delivery"
+  | "review"
   | "timeline";
 
 // Which step the open tab / hash corresponds to. Description and timeline are not on the bar.
@@ -142,6 +143,7 @@ export function flowStepLocation(
   const id = hash.startsWith("#") ? hash.slice(1) : hash;
   if (section === "overview") return id === "flow-confirm" ? "确认" : "草稿";
   if (section === "tickets") return "运行";
+  if (section === "review") return "验收合并";
   if (section === "delivery") {
     if (id === "delivery-finalize") return "收尾";
     if (id === "delivery-prs") return "开 PR";

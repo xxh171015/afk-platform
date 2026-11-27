@@ -16,12 +16,12 @@ import { Page } from "./components/afk/page.tsx";
 import { ErrorState, Skeleton, StaleNotice } from "./components/afk/states.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
 import { feishuClosedMessage } from "./feishu-status.ts";
-import { hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { stageLabel } from "./lib/labels.ts";
 import { LIST_POLL_MS } from "./live.ts";
 import { Onboarding, useProjectList } from "./Onboarding.tsx";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
+import { reviewBadgeCount, useReviewQueue } from "./ReviewQueue.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { formatElapsed } from "./time.ts";
 import { waitingCount } from "./waiting.ts";
@@ -186,10 +186,24 @@ function StaleGroup({
   );
 }
 
+function SummaryLink({ href, text }: { href: string; text: string }) {
+  return (
+    <a
+      href={href}
+      className="group block min-w-0 border-b px-2 py-3 text-[13px] font-medium transition-colors last:border-b-0 hover:bg-accent/50"
+    >
+      {text}
+    </a>
+  );
+}
+
 export function Workbench() {
   const board = useWorkbench();
+  const queue = useReviewQueue();
   const projects = useProjectList();
   const data = board.data;
+  const toLook = queue.data ? reviewBadgeCount(queue.data) : 0;
+  const toMerge = queue.data?.readyToMerge.length ?? 0;
 
   if (board.isError && !board.data) {
     return (
@@ -416,29 +430,24 @@ export function Workbench() {
           <Quadrant
             title="等你验收"
             icon={<ClipboardCheck className="size-4 text-primary" />}
-            count={data.awaitingAcceptance.length}
+            count={toLook}
           >
-            {data.awaitingAcceptance.length === 0 ? (
+            {!queue.data && queue.isPending ? (
+              <LoadingRows />
+            ) : toLook === 0 && toMerge === 0 ? (
               <Empty text={EMPTY_REVIEW} />
             ) : (
-              data.awaitingAcceptance.map((row) => (
-                <ItemLink
-                  key={row.spec.id}
-                  href={paths.specDelivery(row.spec.id)}
-                  displayId={row.spec.displayId}
-                  title={row.spec.title}
-                >
-                  <StatusBadge kind="spec" code={row.spec.state} />
-                  <span>
-                    {row.pullRequestCount} 个{" "}
-                    {pullAbbrev(hostKindOfRepos(row.spec.repos))}
-                  </span>
-                  <span>
-                    验收标准{" "}
-                    <Mono>{`${row.verifiedCriteria}/${row.totalCriteria}`}</Mono>
-                  </span>
-                </ItemLink>
-              ))
+              <>
+                {toLook > 0 ? (
+                  <SummaryLink href={paths.review} text={`${toLook} 个要看`} />
+                ) : null}
+                {toMerge > 0 ? (
+                  <SummaryLink
+                    href={paths.review}
+                    text={`另有 ${toMerge} 个待合并`}
+                  />
+                ) : null}
+              </>
             )}
           </Quadrant>
 

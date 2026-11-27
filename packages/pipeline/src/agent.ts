@@ -324,6 +324,103 @@ const LocateOutputObject = z.object({
 export const LocateOutputSchema = resultSchema(LocateOutputObject);
 export type LocateOutput = z.infer<typeof LocateOutputObject>;
 
+const ReworkCommentResultObject = z.object({
+  id: z.string().min(1),
+  outcome: z.enum(["addressed", "declined"]),
+  reply: z.string().min(1),
+});
+
+const ReworkOutputObject = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("done"),
+    summary: z.string(),
+    comments: z.array(ReworkCommentResultObject),
+    acceptance: z.record(z.string(), z.array(z.string())),
+    decisions: DecisionsField,
+  }),
+  z.object({
+    status: z.literal("cannot-proceed"),
+    blockedReason: z.enum(CANNOT_PROCEED_REASONS),
+    detail: z.string().min(1),
+    summary: z.string().default(""),
+    comments: z.array(ReworkCommentResultObject).default([]),
+    acceptance: z.record(z.string(), z.array(z.string())).default({}),
+    decisions: DecisionsField.default([]),
+  }),
+]);
+export type ReworkOutput = z.infer<typeof ReworkOutputObject>;
+
+function commentsCoverExpectedIds(expectedIds: readonly string[]) {
+  const expected = new Set(expectedIds);
+  return (
+    value: { status: string; comments?: { id: string }[] },
+    ctx: z.RefinementCtx,
+  ) => {
+    if (value.status !== "done") return;
+    const comments = value.comments ?? [];
+    const seen = new Set<string>();
+    for (const [index, item] of comments.entries()) {
+      if (seen.has(item.id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["comments", index, "id"],
+          message: "duplicate comment id",
+        });
+      }
+      seen.add(item.id);
+      if (!expected.has(item.id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["comments", index, "id"],
+          message: "unknown comment id",
+        });
+      }
+    }
+    for (const id of expectedIds) {
+      if (!seen.has(id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["comments"],
+          message: `missing ${id}`,
+        });
+      }
+    }
+  };
+}
+
+export function reworkOutputSchema(expectedIds?: readonly string[]) {
+  const inner =
+    expectedIds === undefined
+      ? ReworkOutputObject
+      : ReworkOutputObject.superRefine(commentsCoverExpectedIds(expectedIds));
+  return resultSchema(inner);
+}
+
+export const ReworkOutputSchema = reworkOutputSchema();
+
+export function reviewCommentIdsFromContext(
+  cwd = process.cwd(),
+): string[] | undefined {
+  for (const path of [
+    "/context/review-comments.json",
+    join(cwd, "context/review-comments.json"),
+  ]) {
+    try {
+      const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const comments = (raw as { comments?: unknown }).comments;
+      if (!Array.isArray(comments)) continue;
+      const ids = comments.flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const id = (item as { id?: unknown }).id;
+        return typeof id === "string" && id.length > 0 ? [id] : [];
+      });
+      return ids;
+    } catch {}
+  }
+  return undefined;
+}
+
 // Stages whose /context/run.json name has a result schema. The self-check command
 // (`packages/pipeline/src/check-result.ts`) looks them up here.
 export const RESULT_CHECK_STAGES = [
@@ -332,6 +429,7 @@ export const RESULT_CHECK_STAGES = [
   "review-fix",
   "merge-fix",
   "final-fix",
+  "rework",
   "update-branch",
   "review",
   "final-review",
@@ -374,6 +472,10 @@ export function resultCheckSchema(
   }
   if (stage === "locate-bug") {
     return options.normalize ? LocateOutputSchema : LocateOutputObject;
+  }
+  if (stage === "rework") {
+    const schema = reworkOutputSchema(reviewCommentIdsFromContext());
+    return options.normalize ? schema : strictResultSchema(schema);
   }
   return undefined;
 }
@@ -445,6 +547,7 @@ export function classifyAgentRun(
     blockedReason?: (typeof CANNOT_PROCEED_REASONS)[number];
     detail?: string;
   }>,
+  options: { requireCommit?: boolean } = {},
 ): Classification<AgentOutcome> {
   const failure = failureOf(result);
   if (failure) return failure;
@@ -465,7 +568,7 @@ export function classifyAgentRun(
       detail: output.detail,
     };
   }
-  return result.commits.length === 0
+  return result.commits.length === 0 && options.requireCommit !== false
     ? {
         kind: "outcome",
         outcome: "no-commits",
@@ -646,6 +749,7 @@ export const PROMPTS = {
   finalReviewStandards: join(PROMPT_DIR, "final-review-standards.md"),
   finalReviewSpec: join(PROMPT_DIR, "final-review-spec.md"),
   finalFix: join(PROMPT_DIR, "final-fix.md"),
+  rework: join(PROMPT_DIR, "rework.md"),
   finalTidy: join(PROMPT_DIR, "final-tidy.md"),
   recheck: join(PROMPT_DIR, "recheck.md"),
   repairResult: join(PROMPT_DIR, "repair-result.md"),
@@ -787,6 +891,7 @@ export function promptFor(
     | "update-branch"
     | "final-review"
     | "final-fix"
+    | "rework"
     | "final-tidy"
     | "recheck"
     | "diagnose"
@@ -800,6 +905,8 @@ export function promptFor(
         : PROMPTS.finalReviewStandards;
     case "final-fix":
       return PROMPTS.finalFix;
+    case "rework":
+      return PROMPTS.rework;
     case "final-tidy":
       return PROMPTS.finalTidy;
     case "recheck":

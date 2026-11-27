@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as RuntimeRouteImport } from './routes/runtime'
 import { Route as WaitingRouteImport } from './routes/waiting'
+import { Route as ReviewRouteImport } from './routes/review'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projectId'
 import { Route as RunsRunIdRouteImport } from './routes/runs/$runId'
 import { Route as SpecsIndexRouteImport } from './routes/specs/index'
@@ -20,6 +21,7 @@ import { Route as SpecsSpecIdRouteImport } from './routes/specs/$specId'
 import { Route as TicketsTicketIdRouteImport } from './routes/tickets/$ticketId'
 import { Route as SpecsSpecIdIndexRouteImport } from './routes/specs/$specId/index'
 import { Route as SpecsSpecIdDeliveryRouteImport } from './routes/specs/$specId/delivery'
+import { Route as SpecsSpecIdReviewRouteImport } from './routes/specs/$specId/review'
 import { Route as SpecsSpecIdDescriptionRouteImport } from './routes/specs/$specId/description'
 import { Route as SpecsSpecIdTicketsRouteImport } from './routes/specs/$specId/tickets'
 import { Route as SpecsSpecIdTimelineRouteImport } from './routes/specs/$specId/timeline'
@@ -42,6 +44,11 @@ const RuntimeRoute = RuntimeRouteImport.update({
 const WaitingRoute = WaitingRouteImport.update({
   id: '/waiting',
   path: '/waiting',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewRoute = ReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
@@ -79,6 +86,11 @@ const SpecsSpecIdDeliveryRoute = SpecsSpecIdDeliveryRouteImport.update({
   path: '/delivery',
   getParentRoute: () => SpecsSpecIdRoute,
 } as any)
+const SpecsSpecIdReviewRoute = SpecsSpecIdReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => SpecsSpecIdRoute,
+} as any)
 const SpecsSpecIdDescriptionRoute = SpecsSpecIdDescriptionRouteImport.update({
   id: '/description',
   path: '/description',
@@ -100,12 +112,14 @@ export interface FileRoutesByFullPath {
   '/metrics': typeof MetricsRoute
   '/runtime': typeof RuntimeRoute
   '/waiting': typeof WaitingRoute
+  '/review': typeof ReviewRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/specs/$specId': typeof SpecsSpecIdRouteWithChildren
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs/': typeof SpecsIndexRoute
   '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/review': typeof SpecsSpecIdReviewRoute
   '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
   '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
   '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
@@ -116,11 +130,13 @@ export interface FileRoutesByTo {
   '/metrics': typeof MetricsRoute
   '/runtime': typeof RuntimeRoute
   '/waiting': typeof WaitingRoute
+  '/review': typeof ReviewRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs': typeof SpecsIndexRoute
   '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/review': typeof SpecsSpecIdReviewRoute
   '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
   '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
   '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
@@ -132,12 +148,14 @@ export interface FileRoutesById {
   '/metrics': typeof MetricsRoute
   '/runtime': typeof RuntimeRoute
   '/waiting': typeof WaitingRoute
+  '/review': typeof ReviewRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/specs/$specId': typeof SpecsSpecIdRouteWithChildren
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs/': typeof SpecsIndexRoute
   '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/review': typeof SpecsSpecIdReviewRoute
   '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
   '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
   '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
@@ -150,12 +168,14 @@ export interface FileRouteTypes {
     | '/metrics'
     | '/runtime'
     | '/waiting'
+    | '/review'
     | '/projects/$projectId'
     | '/runs/$runId'
     | '/specs/$specId'
     | '/tickets/$ticketId'
     | '/specs/'
     | '/specs/$specId/delivery'
+    | '/specs/$specId/review'
     | '/specs/$specId/description'
     | '/specs/$specId/tickets'
     | '/specs/$specId/timeline'
@@ -166,11 +186,13 @@ export interface FileRouteTypes {
     | '/metrics'
     | '/runtime'
     | '/waiting'
+    | '/review'
     | '/projects/$projectId'
     | '/runs/$runId'
     | '/tickets/$ticketId'
     | '/specs'
     | '/specs/$specId/delivery'
+    | '/specs/$specId/review'
     | '/specs/$specId/description'
     | '/specs/$specId/tickets'
     | '/specs/$specId/timeline'
@@ -181,12 +203,14 @@ export interface FileRouteTypes {
     | '/metrics'
     | '/runtime'
     | '/waiting'
+    | '/review'
     | '/projects/$projectId'
     | '/runs/$runId'
     | '/specs/$specId'
     | '/tickets/$ticketId'
     | '/specs/'
     | '/specs/$specId/delivery'
+    | '/specs/$specId/review'
     | '/specs/$specId/description'
     | '/specs/$specId/tickets'
     | '/specs/$specId/timeline'
@@ -198,6 +222,7 @@ export interface RootRouteChildren {
   MetricsRoute: typeof MetricsRoute
   RuntimeRoute: typeof RuntimeRoute
   WaitingRoute: typeof WaitingRoute
+  ReviewRoute: typeof ReviewRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   SpecsSpecIdRoute: typeof SpecsSpecIdRouteWithChildren
@@ -233,6 +258,13 @@ declare module '@tanstack/react-router' {
       path: '/waiting'
       fullPath: '/waiting'
       preLoaderRoute: typeof WaitingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/review': {
+      id: '/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof ReviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/projects/$projectId': {
@@ -284,6 +316,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SpecsSpecIdDeliveryRouteImport
       parentRoute: typeof SpecsSpecIdRoute
     }
+    '/specs/$specId/review': {
+      id: '/specs/$specId/review'
+      path: '/review'
+      fullPath: '/specs/$specId/review'
+      preLoaderRoute: typeof SpecsSpecIdReviewRouteImport
+      parentRoute: typeof SpecsSpecIdRoute
+    }
     '/specs/$specId/description': {
       id: '/specs/$specId/description'
       path: '/description'
@@ -310,6 +349,7 @@ declare module '@tanstack/react-router' {
 
 interface SpecsSpecIdRouteChildren {
   SpecsSpecIdDeliveryRoute: typeof SpecsSpecIdDeliveryRoute
+  SpecsSpecIdReviewRoute: typeof SpecsSpecIdReviewRoute
   SpecsSpecIdDescriptionRoute: typeof SpecsSpecIdDescriptionRoute
   SpecsSpecIdTicketsRoute: typeof SpecsSpecIdTicketsRoute
   SpecsSpecIdTimelineRoute: typeof SpecsSpecIdTimelineRoute
@@ -318,6 +358,7 @@ interface SpecsSpecIdRouteChildren {
 
 const SpecsSpecIdRouteChildren: SpecsSpecIdRouteChildren = {
   SpecsSpecIdDeliveryRoute: SpecsSpecIdDeliveryRoute,
+  SpecsSpecIdReviewRoute: SpecsSpecIdReviewRoute,
   SpecsSpecIdDescriptionRoute: SpecsSpecIdDescriptionRoute,
   SpecsSpecIdTicketsRoute: SpecsSpecIdTicketsRoute,
   SpecsSpecIdTimelineRoute: SpecsSpecIdTimelineRoute,
@@ -333,6 +374,7 @@ const rootRouteChildren: RootRouteChildren = {
   MetricsRoute: MetricsRoute,
   RuntimeRoute: RuntimeRoute,
   WaitingRoute: WaitingRoute,
+  ReviewRoute: ReviewRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   SpecsSpecIdRoute: SpecsSpecIdRouteWithChildren,

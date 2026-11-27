@@ -40,6 +40,8 @@ export interface AutoMergeInput {
   awaitingReviewAt: Date | null;
   hadAutoMergeJob: boolean;
   now: Date;
+  // Submitted Review comments on this spec. Drafts do not count.
+  reviewComments: number;
 }
 
 export type AutoMergeResult =
@@ -135,6 +137,9 @@ export function autoMergeForecast(input: AutoMergeInput): AutoMergeResult {
   }
   if (pull.humanComments > 0) {
     return fail("PR 上有人写过评论");
+  }
+  if (input.reviewComments > 0) {
+    return fail("平台上有人审意见");
   }
   if (input.needsDecision.some((item) => item.kind === "needs-human")) {
     return fail("验收包有 needs-human");

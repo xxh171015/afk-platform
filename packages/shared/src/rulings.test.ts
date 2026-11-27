@@ -164,6 +164,32 @@ describe("collectNeedsDecision", () => {
     ).toEqual([]);
   });
 
+  it("lists an unruled Rework conflict without a Spec-axis ruling", () => {
+    expect(
+      collectNeedsDecision({
+        decisions: [
+          {
+            id: "R-40#0",
+            kind: "conflict",
+            text: "comment asked to edit a protected path",
+            source: "S-1 rework",
+            unruled: true,
+          },
+        ],
+        ticketRulings: [],
+        specRulings: [],
+        tickets: [{ displayId: "T-1", state: "done" }],
+      }),
+    ).toEqual([
+      {
+        kind: "needs-human",
+        id: "R-40#0",
+        source: "S-1 rework",
+        text: "comment asked to edit a protected path",
+      },
+    ]);
+  });
+
   it("omits a deferred whose ticket is done, and keeps new or unfinished ones", () => {
     expect(
       collectNeedsDecision({

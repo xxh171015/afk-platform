@@ -30,6 +30,7 @@ import {
   isDeterministicPushFailure,
   modelFor,
   type PushFailureTips,
+  parseTicketBranch,
   type ReviewAxis,
   unrecoverableJobError,
 } from "@afk/shared";
@@ -172,7 +173,9 @@ export const subjectLabel = (bundle: Bundle) => {
   if (bundle.ticket) return bundle.ticket.displayId;
   if (bundle.job.stage === "update-branch")
     return `${bundle.spec.displayId}-update`;
-  return `${bundle.spec.displayId}-final`;
+  return (
+    parseTicketBranch(bundle.agentBranch) ?? `${bundle.spec.displayId}-final`
+  );
 };
 const successful = new Set(["done", "passed", "pass", "merged"]);
 export const isSuccess = (body: StageOutcomeBody) =>
@@ -348,6 +351,7 @@ export async function renderFor(
     ...(bundle.failureLog ? { failureLog: bundle.failureLog } : {}),
     ...(bundle.failedCases?.length ? { failedCases: bundle.failedCases } : {}),
     ...(bundle.review ? { review: bundle.review } : {}),
+    ...(bundle.reviewComments ? { reviewComments: bundle.reviewComments } : {}),
     ...(bundle.contracts.length ? { contracts } : {}),
     ...(domainFiles ? { domain: domainFiles } : {}),
     ...(integration

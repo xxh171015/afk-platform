@@ -1,3 +1,4 @@
+import { REVIEW_NOTE_MARKER } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createGitLabAdapter } from "./gitlab.ts";
 import { FakeGitLab } from "./testing/fake-gitlab.ts";
@@ -505,6 +506,58 @@ describe("humanComments", () => {
       bot: true,
     });
     expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(1);
+  });
+});
+
+describe("upsertPlatformComment", () => {
+  const marker = REVIEW_NOTE_MARKER;
+  const upsert = (body: string) =>
+    adapter().upsertPlatformComment({ repo, number: 1, marker, body });
+
+  it("creates a merge-request note when none of the token user's notes has the marker", async () => {
+    await open();
+    gitlab.addNote(1, { username: "alice", body: `${marker}\nnot ours` });
+    const created = await upsert(`${marker}\n处理中`);
+    expect(created.id).toMatch(/^\d+$/);
+    expect(gitlab.notesOf(1)).toEqual([
+      expect.objectContaining({
+        username: "alice",
+        body: `${marker}\nnot ours`,
+      }),
+      expect.objectContaining({
+        username: gitlab.username,
+        body: `${marker}\n处理中`,
+      }),
+    ]);
+  });
+
+  it("updates the token user's marked note instead of creating a second", async () => {
+    await open();
+    const first = await upsert(`${marker}\n处理中`);
+    const second = await upsert(`${marker}\n已处理`);
+    expect(second.id).toBe(first.id);
+    expect(gitlab.notesOf(1)).toEqual([
+      expect.objectContaining({
+        id: Number(first.id),
+        body: `${marker}\n已处理`,
+      }),
+    ]);
+  });
+
+  it("does not count the platform note as a human comment", async () => {
+    await open();
+    await upsert(`${marker}\n处理中`);
+    expect(
+      (await adapter().getPullRequest({ repo, number: 1 })).humanComments,
+    ).toBe(0);
+  });
+
+  it("throws a HostError when GitLab refuses to write notes", async () => {
+    await open();
+    gitlab.refuseNotes = true;
+    const error = await upsert(`${marker}\n处理中`).catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error.status).toBe(403);
   });
 });
 

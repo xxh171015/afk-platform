@@ -107,7 +107,7 @@ export function readFinalPayload(
   return { specId, repoId, step: stage as FinalStep };
 }
 
-// final-review, final-fix and final-tidy are agent runs; final-merge and tidy-merge put the branch
+// final-review, final-fix, rework and final-tidy are agent runs; final-merge and tidy-merge put the branch
 // under the same lock a ticket's merge does.
 export async function enqueueFinalJob(
   client: pg.PoolClient,
@@ -150,6 +150,27 @@ export async function enqueueFinalJob(
 }
 
 // Stop this ticket's queued and running stage jobs (gate and review can both be out) and close their Runs.
+export async function cancelFinalJobs(
+  client: pg.PoolClient,
+  specId: number,
+  error: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE jobs SET state = 'failed', error = $2,
+       lease_owner = NULL, lease_expires_at = NULL
+     WHERE state IN ('queued', 'running') AND (payload->>'specId')::int = $1
+       AND (payload->>'final')::boolean IS TRUE`,
+    [specId, error],
+  );
+  await client.query(
+    `UPDATE runs SET finished_at = COALESCE(finished_at, now()), result = 'cancelled',
+       duration_ms = COALESCE(duration_ms, LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int),
+       output = jsonb_build_object('error', $2::text)
+     WHERE spec_id = $1 AND ticket_id IS NULL AND finished_at IS NULL`,
+    [specId, error],
+  );
+}
+
 export async function cancelTicketJobs(
   client: pg.PoolClient,
   ticketId: number,

@@ -1,5 +1,6 @@
 import {
   BLOCKED_REASONS,
+  CHANGE_REQUEST_STATES,
   DISK_NOTICED,
   EDGE_KINDS,
   EVENT_SOURCES,
@@ -15,6 +16,11 @@ import {
   LOCATE_STATES,
   PARALLEL_REVIEW_STATES,
   PAUSE_REASONS,
+  REVIEW_COMMENT_SIDES,
+  REVIEW_COMMENT_STATES,
+  REVIEW_FILE_STATUSES,
+  REVIEW_PATCH_OMITTED_REASONS,
+  REVIEW_REVISION_STATES,
   SPEC_STATES,
   SPEC_TYPES,
   TICKET_REVIEW_MODES,
@@ -41,7 +47,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-// Display ids (S-12, T-123, R-456) are the prefix plus the serial id; they are not stored.
+// Display ids (S-12, T-123, R-456, C-7) are the prefix plus the serial id; they are not stored.
 // Field lists follow docs/design.md「领域模型与状态机」and docs/specs/m1-platform.md「数据模型」.
 
 // CHECK constraint helper. The vocabularies come from @afk/shared so the database and zod cannot drift apart.
@@ -592,6 +598,175 @@ export const pullRequests = pgTable(
     check(
       "pull_requests_review_check",
       oneOf(t.review, ["none", "approved", "changes-requested"]),
+    ),
+  ],
+);
+
+// A Review revision: the diff and attribution for one PR head (GLOSSARY Review revision).
+export const reviewRevisions = pgTable(
+  "review_revisions",
+  {
+    id: serial("id").primaryKey(),
+    pullRequestId: integer("pull_request_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    headSha: text("head_sha").notNull(),
+    baseSha: text("base_sha"),
+    mergeBaseSha: text("merge_base_sha"),
+    previousHeadSha: text("previous_head_sha"),
+    state: text("state").notNull().default("pending"),
+    error: text("error"),
+    complete: boolean("complete").notNull().default(false),
+    omittedReason: text("omitted_reason"),
+    filesCount: integer("files_count").notNull().default(0),
+    additions: integer("additions").notNull().default(0),
+    deletions: integer("deletions").notNull().default(0),
+    // Assembled Review guide for this revision (GLOSSARY Review guide). Null until first GET.
+    guide: jsonb("guide"),
+    createdAt: createdAt(),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("review_revisions_pull_head_unique").on(t.pullRequestId, t.headSha),
+    check(
+      "review_revisions_state_check",
+      oneOf(t.state, REVIEW_REVISION_STATES),
+    ),
+  ],
+);
+
+export const reviewFiles = pgTable(
+  "review_files",
+  {
+    id: serial("id").primaryKey(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => reviewRevisions.id),
+    path: text("path").notNull(),
+    oldPath: text("old_path"),
+    status: text("status").notNull(),
+    oldBlob: text("old_blob").notNull(),
+    newBlob: text("new_blob").notNull(),
+    additions: integer("additions").notNull().default(0),
+    deletions: integer("deletions").notNull().default(0),
+    binary: boolean("binary").notNull().default(false),
+    generated: boolean("generated").notNull().default(false),
+    test: boolean("test").notNull().default(false),
+    lockfile: boolean("lockfile").notNull().default(false),
+    patch: text("patch"),
+    patchOmitted: text("patch_omitted"),
+    sincePatch: text("since_patch"),
+    attributions: jsonb("attributions").notNull().default([]),
+    hunks: jsonb("hunks"),
+  },
+  (t) => [
+    unique("review_files_revision_path_unique").on(t.revisionId, t.path),
+    check("review_files_status_check", oneOf(t.status, REVIEW_FILE_STATUSES)),
+    check(
+      "review_files_patch_omitted_check",
+      sql`${t.patchOmitted} is null or ${oneOf(t.patchOmitted, REVIEW_PATCH_OMITTED_REASONS)}`,
+    ),
+  ],
+);
+
+export const reviewBlobs = pgTable(
+  "review_blobs",
+  {
+    sha: text("sha").primaryKey(),
+    content: text("content").notNull(),
+    bytes: integer("bytes").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [check("review_blobs_sha_check", sql`${t.sha} ~ '^[0-9a-f]{40}$'`)],
+);
+
+export const reviewFileViews = pgTable(
+  "review_file_views",
+  {
+    pullRequestId: integer("pull_request_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    path: text("path").notNull(),
+    newBlob: text("new_blob").notNull(),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.pullRequestId, t.path] }),
+    check("review_file_views_blob_check", sql`${t.newBlob} ~ '^[0-9a-f]{40}$'`),
+  ],
+);
+
+// A Change request: one submit of a spec's Review comment drafts (GLOSSARY Change request).
+export const changeRequests = pgTable(
+  "change_requests",
+  {
+    id: serial("id").primaryKey(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    number: integer("number").notNull(),
+    state: text("state").notNull().default("active"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("change_requests_spec_number_unique").on(t.specId, t.number),
+    index("change_requests_spec_idx").on(t.specId),
+    check("change_requests_state_check", oneOf(t.state, CHANGE_REQUEST_STATES)),
+    check("change_requests_number_check", sql`${t.number} >= 1`),
+  ],
+);
+
+// A Review comment: a person's note on one Review revision (GLOSSARY Review comment). Not a Finding.
+// change_request_id is filled when a Change request is submitted; drafts leave it null.
+export const reviewComments = pgTable(
+  "review_comments",
+  {
+    id: serial("id").primaryKey(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    pullRequestId: integer("pull_request_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => reviewRevisions.id),
+    path: text("path"),
+    side: text("side"),
+    lineStart: integer("line_start"),
+    lineEnd: integer("line_end"),
+    excerpt: text("excerpt"),
+    body: text("body").notNull(),
+    state: text("state").notNull().default("draft"),
+    changeRequestId: integer("change_request_id").references(
+      () => changeRequests.id,
+    ),
+    reply: text("reply"),
+    reworkRunId: integer("rework_run_id").references(() => runs.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("review_comments_pull_idx").on(t.pullRequestId),
+    index("review_comments_spec_state_idx").on(t.specId, t.state),
+    check("review_comments_state_check", oneOf(t.state, REVIEW_COMMENT_STATES)),
+    check(
+      "review_comments_side_check",
+      sql`${t.side} is null or ${oneOf(t.side, REVIEW_COMMENT_SIDES)}`,
+    ),
+    check(
+      "review_comments_body_check",
+      sql`char_length(${t.body}) between 1 and 4000`,
+    ),
+    check(
+      "review_comments_pr_anchor_check",
+      sql`${t.path} is not null or (${t.side} is null and ${t.lineStart} is null and ${t.lineEnd} is null)`,
+    ),
+    check(
+      "review_comments_line_range_check",
+      sql`${t.lineEnd} is null or (${t.lineStart} is not null and ${t.lineEnd} >= ${t.lineStart})`,
     ),
   ],
 );

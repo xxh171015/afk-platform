@@ -127,7 +127,7 @@ describe("noticesFromTransition", () => {
     ).toEqual([
       {
         title: "可以来验收了",
-        body: "S-4 导出订单：验收包和 PR 已齐\nhttp://127.0.0.1:5173/specs/4/delivery",
+        body: "S-4 导出订单：验收包和 PR 已齐\nhttp://127.0.0.1:5173/specs/4/review",
       },
     ]);
     expect(
@@ -326,7 +326,7 @@ describe("noticesFromTransition", () => {
     ).toEqual([
       {
         title: "可以来验收了",
-        body: "S-4 导出订单：验收包和 MR 已齐\nhttp://127.0.0.1:5173/specs/4/delivery",
+        body: "S-4 导出订单：验收包和 MR 已齐\nhttp://127.0.0.1:5173/specs/4/review",
       },
     ]);
     const draft: Shot = {

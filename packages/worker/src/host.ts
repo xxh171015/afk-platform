@@ -24,6 +24,7 @@ import {
 } from "@afk/shared";
 import { deleteOrphanRefs } from "./align-ticket-branch.ts";
 import { InfrastructureError } from "./executor.ts";
+import { computeReviewRevision } from "./review-revision.ts";
 
 // The jobs that talk to the code host. The worker does them because the host's credentials are only here.
 export interface HostDeps {
@@ -247,6 +248,32 @@ export async function runHostTask(
       error instanceof HostError || error instanceof RangeError
         ? error.message
         : `could not ${doing}: ${String(error)}`;
+    let pr: Awaited<ReturnType<HostAdapter["getPullRequest"]>>;
+    try {
+      pr = await deps.adapter.getPullRequest({
+        repo,
+        number: task.number,
+      });
+    } catch (error) {
+      return failed(reasonOf(error, "read the pull request"));
+    }
+    if (pr.state !== "open") {
+      return failed(`pull request is ${pr.state}, not open`);
+    }
+    if (pr.draft) {
+      return failed("pull request is a draft");
+    }
+    if (pr.headSha !== task.expectedHeadSha) {
+      return failed(
+        `pull request head ${pr.headSha} is not the expected ${task.expectedHeadSha}`,
+      );
+    }
+    if (pr.humanComments > 0) {
+      return failed("a person has commented on the pull request");
+    }
+    if (pr.review === "changes-requested") {
+      return failed("pull request review is changes-requested");
+    }
     let current: string;
     try {
       current = await deps.adapter.getPullRequestBody({
@@ -313,6 +340,37 @@ export async function runHostTask(
     });
     log(`indexed ${links.length} pr Link(s) for pull request ${task.number}`);
     return { stage: "index-pr-links", links };
+  }
+  if (task.kind === "review-note") {
+    try {
+      const written = await deps.adapter.upsertPlatformComment({
+        repo: repoRef(task.repoUrl),
+        number: task.number,
+        marker: task.marker,
+        body: task.body,
+      });
+      log(
+        `upserted review-notes comment ${written.id} on pull request ${task.number}`,
+      );
+      return { stage: "review-note", outcome: "upserted", id: written.id };
+    } catch (error) {
+      throw new InfrastructureError(
+        error instanceof HostError || error instanceof RangeError
+          ? error.message
+          : `could not write the review-notes comment: ${String(error)}`,
+      );
+    }
+  }
+  if (task.kind === "review-revision") {
+    if (!deps.repoDir)
+      throw new InfrastructureError(
+        "review-revision needs a clone of the default branch",
+      );
+    const result = computeReviewRevision(deps.repoDir, task);
+    log(
+      `review revision ${task.headSha.slice(0, 7)}: ${result.filesCount} files`,
+    );
+    return { ...result };
   }
   const pulls = [];
   for (const pull of task.pulls ?? []) {

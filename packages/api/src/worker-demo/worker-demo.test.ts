@@ -1288,7 +1288,7 @@ describe("the planning commit, end to end", { timeout: 60_000 }, () => {
     ).toBe(200);
 
     const seen: Record<string, string | undefined> = {};
-    await runWorker({
+    const worker = {
       api: workerFor(),
       executor: deps({
         script: (ctx) => {
@@ -1300,7 +1300,12 @@ describe("the planning commit, end to end", { timeout: 60_000 }, () => {
       }),
       stopWhenIdle: true,
       heartbeatMs: 50,
-    });
+    };
+    // Planning-commit is slotless; tickets are slot jobs queued only after it
+    // finishes. stopWhenIdle can return from the slot loop while that commit is
+    // still running, so a second pass picks up the tickets.
+    await runWorker(worker);
+    await runWorker(worker);
 
     expect(await stateOf()).toEqual(["1:done", "2:done"]);
     const first = gitOut(origin, [

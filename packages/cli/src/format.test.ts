@@ -808,6 +808,29 @@ const specShow = (
     autoMerge,
   } as never);
 
+describe("plat spec show review comments", () => {
+  it("prints live comment counts and the latest change request", () => {
+    expect(
+      specText({
+        spec: {
+          displayId: "S-1",
+          title: "Export",
+          state: "awaiting-review",
+          pauseReason: null,
+          warnings: [],
+        },
+        tickets: [],
+        finalizations: [],
+        edges: [],
+        reviewComments: { submitted: 1, addressed: 1, declined: 1 },
+        latestChangeRequest: { number: 2, state: "done" },
+      } as never),
+    ).toContain(
+      "人审意见 3 条（待处理 1 / 已处理 1 / 没处理 1），最近一次修改要求 #2 已完成",
+    );
+  });
+});
+
 describe("plat spec show reworking", () => {
   it("prints 返工中 instead of the English state code", () => {
     expect(

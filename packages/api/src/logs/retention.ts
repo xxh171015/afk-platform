@@ -2,6 +2,7 @@ import type { Dirent } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type pg from "pg";
+import { purgeExpiredReviewPayloads } from "../host/review-revision.ts";
 import type { LogStore } from "./log-store.ts";
 
 // Run logs of a spec that has been merged or cancelled this many days are deleted; the Run rows stay.
@@ -102,6 +103,8 @@ export async function retainLogs(options: {
        AND created_at + make_interval(days => $2::int) <= $1::timestamptz`,
     [options.now, JOB_RESULT_RETENTION_DAYS],
   );
+
+  await purgeExpiredReviewPayloads(options.pool, options.now, days);
 
   await options.pool.query(
     `UPDATE instance SET logs_purged_at = $1, logs_purged_runs = $2, logs_purged_orphans = $3`,

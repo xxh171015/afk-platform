@@ -1,4 +1,5 @@
 import {
+  CHANGE_REQUEST_STATES,
   FAILURE_SOURCES,
   HOST_KINDS,
   JOB_STATES,
@@ -21,6 +22,7 @@ import { refreshDiskStatus } from "../disk.ts";
 import { aroundSpec, aroundTicket } from "../events/announce.ts";
 import { waiveFinalE2e } from "../finalize/final-e2e.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
+import { submitChangeRequest } from "../host/change-requests.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import {
   allowPaths,
@@ -481,6 +483,17 @@ const specRoute = createRoute({
             })
             .nullable(),
         }),
+        reviewComments: z.object({
+          submitted: Id,
+          addressed: Id,
+          declined: Id,
+        }),
+        latestChangeRequest: z
+          .object({
+            number: Id,
+            state: z.enum(CHANGE_REQUEST_STATES),
+          })
+          .nullable(),
       }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -1160,6 +1173,47 @@ const waiveFinalRoute = createRoute({
   },
 });
 
+const changeRequestRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/change-requests",
+  request: {
+    params: z.object({ id: PathId }),
+    body: {
+      content: json(
+        z.object({ acknowledgeStale: z.boolean().optional() }).strict(),
+      ),
+      required: false,
+    },
+  },
+  responses: {
+    200: reply(
+      "The drafts are one Change request; repos with comments start Rework",
+      z.object({
+        id: Id,
+        number: Id,
+        state: z.enum(CHANGE_REQUEST_STATES),
+        comments: z.array(z.string()),
+      }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply(
+      "The spec cannot take a Change request, or drafts were written on an older Review revision",
+      z.object({
+        error: z.string(),
+        stale: z
+          .array(
+            z.object({
+              displayId: z.string(),
+              writtenOn: z.string(),
+              currentHead: z.string(),
+            }),
+          )
+          .optional(),
+      }),
+    ),
+  },
+});
+
 const retryCleanupRoute = createRoute({
   method: "post",
   path: "/specs/{id}/cleanup",
@@ -1480,6 +1534,35 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ waived: true as const }, 200);
+  });
+
+  app.openapi(changeRequestRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    let acknowledgeStale = false;
+    try {
+      acknowledgeStale = c.req.valid("json")?.acknowledgeStale === true;
+    } catch {
+      acknowledgeStale = false;
+    }
+    const result = await aroundSpec(context, id, () =>
+      submitChangeRequest(pool, id, acknowledgeStale),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused") {
+      return result.stale
+        ? c.json({ error: result.message, stale: result.stale }, 409)
+        : c.json({ error: result.message }, 409);
+    }
+    return c.json(
+      {
+        id: result.id,
+        number: result.number,
+        state: result.state,
+        comments: result.comments,
+      },
+      200,
+    );
   });
 
   app.openapi(retryCleanupRoute, async (c) => {

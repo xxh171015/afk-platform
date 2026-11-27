@@ -13,6 +13,7 @@ export const MANUAL_MERGE_NOTE =
 export const AUTO_IMPROVEMENT_MERGE_NOTE =
   "满足条件时平台会在 30 分钟后自动合并，在 PR 上写评论即可阻止";
 export const AUTO_MERGED_MARK = "<!-- afk:auto-merged -->";
+export const REVIEW_NOTE_MARKER = "<!-- afk:review-notes -->";
 export const AUTO_MERGED_NOTE = "平台已自动合并";
 export const AUTO_MERGED_SECTION = `${AUTO_MERGED_MARK}\n${AUTO_MERGED_NOTE}`;
 

@@ -388,6 +388,41 @@ describe("renderContext", () => {
     expect(runJson.allowedProtectedPaths).toEqual(["openapi/openapi.yaml"]);
   });
 
+  it("writes review-comments.json for a Rework run, and omits it otherwise", () => {
+    const dir = ctxDir();
+    const comments = {
+      changeRequest: 2,
+      currentHead: "e4f5a6b",
+      comments: [
+        {
+          id: "C-12",
+          writtenOn: "a1b2c3d",
+          path: "src/orders/list.ts",
+          side: "new",
+          lines: [41, 44],
+          excerpt: "throw notFound();",
+          body: "empty list should return 200 and []",
+        },
+        {
+          id: "C-14",
+          writtenOn: "e4f5a6b",
+          path: null,
+          body: "migrations must be repeatable",
+        },
+      ],
+    };
+    renderContext({
+      dir,
+      bundle: bundleFor({ stage: "rework", ticket: null }),
+      run,
+      reviewComments: comments,
+    });
+    expect(JSON.parse(read(dir, "review-comments.json"))).toEqual(comments);
+    const other = ctxDir();
+    renderContext({ dir: other, bundle: bundleFor(), run });
+    expect(existsSync(join(other, "review-comments.json"))).toBe(false);
+  });
+
   it("writes the failure log for a fix and the review result for a review-fix", () => {
     const dir = ctxDir();
     const review = {

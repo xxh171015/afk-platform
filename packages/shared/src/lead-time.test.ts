@@ -107,6 +107,7 @@ describe("leadTime", () => {
 describe("runLeadSegment", () => {
   it("counts implement, review and the update-branch merge agent as agent", () => {
     expect(runLeadSegment("implement", "done")).toBe("agent");
+    expect(runLeadSegment("rework", "done")).toBe("agent");
     expect(runLeadSegment("review", "pass")).toBe("agent");
     expect(runLeadSegment("update-branch", "done")).toBe("agent");
     expect(runLeadSegment("update-branch", "timeout")).toBe("agent");

@@ -15,6 +15,7 @@ import { specTypeLabel } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { SpecBody } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
+import { ReviewPage } from "./ReviewPage.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { Delivery } from "./spec-detail/delivery.tsx";
 import { Overview } from "./spec-detail/overview.tsx";
@@ -46,17 +47,20 @@ export type SpecSection =
   | "description"
   | "tickets"
   | "delivery"
+  | "review"
   | "timeline";
 
 const SECTIONS: {
   id: SpecSection;
   label: string;
   href: (id: number) => string;
+  needsPulls?: boolean;
 }[] = [
   { id: "overview", label: "概览", href: paths.spec },
   { id: "description", label: "需求说明", href: paths.specDescription },
   { id: "tickets", label: "票与依赖", href: paths.specTickets },
   { id: "delivery", label: "交付", href: paths.specDelivery },
+  { id: "review", label: "审查", href: paths.specReview, needsPulls: true },
   { id: "timeline", label: "时间线", href: paths.specTimeline },
 ];
 
@@ -341,7 +345,9 @@ export function SpecDetail({
         aria-label="需求页"
         className="spec-sections mb-5 flex gap-1 overflow-x-auto border-b pb-2"
       >
-        {SECTIONS.map((item) => (
+        {SECTIONS.filter(
+          (item) => !item.needsPulls || pullRequests.length > 0,
+        ).map((item) => (
           <a
             key={item.id}
             href={item.href(specId)}
@@ -400,6 +406,7 @@ export function SpecDetail({
       ) : null}
       {section === "delivery" ? (
         <Delivery
+          specId={specId}
           pullRequests={pullRequests}
           orderBroken={orderBroken}
           mergeOrder={mergeOrder}
@@ -412,6 +419,7 @@ export function SpecDetail({
           specState={spec.state}
         />
       ) : null}
+      {section === "review" ? <ReviewPage specId={specId} /> : null}
       {section === "timeline" ? (
         <TimelinePage
           events={timeline}

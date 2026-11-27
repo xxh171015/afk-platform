@@ -54,6 +54,16 @@ export interface AutoMergePayload {
   expectedHeadSha: string;
 }
 
+export interface ReviewRevisionPayload {
+  pullId: number;
+  headSha: string;
+  previousHeadSha: string | null;
+}
+
+export interface ReviewNotePayload {
+  pullId: number;
+}
+
 export function readPrReadyPayload(job: {
   type?: string;
   payload: Record<string, unknown>;
@@ -142,6 +152,33 @@ export function readAutoMergePayload(job: {
     typeof pullId === "number" &&
     typeof expectedHeadSha === "string"
     ? { specId, pullId, expectedHeadSha }
+    : undefined;
+}
+
+export function readReviewRevisionPayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): ReviewRevisionPayload | undefined {
+  const { pullId, headSha, previousHeadSha } = job.payload;
+  return job.type === "review-revision" &&
+    typeof pullId === "number" &&
+    typeof headSha === "string" &&
+    (previousHeadSha === null || typeof previousHeadSha === "string")
+    ? {
+        pullId,
+        headSha,
+        previousHeadSha: previousHeadSha ?? null,
+      }
+    : undefined;
+}
+
+export function readReviewNotePayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): ReviewNotePayload | undefined {
+  const { pullId } = job.payload;
+  return job.type === "review-note" && typeof pullId === "number"
+    ? { pullId }
     : undefined;
 }
 
@@ -356,6 +393,51 @@ export async function stopAutoMergeJobs(
        AND (payload->>'specId')::int = $1`,
     [specId, error],
   );
+}
+
+export const reviewRevisionKeyPrefix = ({
+  pullId,
+  headSha,
+}: Pick<ReviewRevisionPayload, "pullId" | "headSha">) =>
+  `pull-${pullId}:review-revision:${headSha}:`;
+
+export async function enqueueReviewRevisionJob(
+  client: pg.PoolClient,
+  payload: ReviewRevisionPayload,
+) {
+  const prefix = reviewRevisionKeyPrefix(payload);
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${prefix}%`],
+  );
+  return enqueueJob(client, {
+    type: "review-revision",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+  });
+}
+
+export const reviewNoteKeyPrefix = ({ pullId }: ReviewNotePayload) =>
+  `pull-${pullId}:review-note:`;
+
+export async function enqueueReviewNote(
+  client: pg.PoolClient,
+  payload: ReviewNotePayload,
+  notBefore?: Date,
+) {
+  const prefix = reviewNoteKeyPrefix(payload);
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${prefix}%`],
+  );
+  return enqueueJob(client, {
+    type: "review-note",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+    ...(notBefore ? { notBefore } : {}),
+  });
 }
 
 export async function enqueuePackDescriptions(

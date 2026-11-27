@@ -1257,6 +1257,19 @@ describe("the spec page", () => {
 });
 
 describe("auto-merge on the delivery page", () => {
+  const openPr = {
+    order: 1,
+    waitsFor: [],
+    repo: "backend",
+    number: 7,
+    url: "https://github.com/me/shop/pull/7",
+    state: "open",
+    draft: false,
+    ci: "success",
+    review: "none",
+    syncError: null,
+  };
+
   const delivery = (
     autoMerge: {
       policy: string;
@@ -1266,6 +1279,7 @@ describe("auto-merge on the delivery page", () => {
       event: { type: string; reason: string | null } | null;
     },
     spec: Record<string, unknown> = { state: "awaiting-review" },
+    over: { pullRequests?: unknown[] } = {},
   ) =>
     fakeServer({
       "GET /specs/1": () => ({
@@ -1274,6 +1288,7 @@ describe("auto-merge on the delivery page", () => {
           tickets: [ticket(1, "done")],
           edges: [],
           autoMerge,
+          pullRequests: over.pullRequests,
         }),
       }),
     });
@@ -1291,6 +1306,52 @@ describe("auto-merge on the delivery page", () => {
     );
     await screen.findByRole("heading", { name: "验收包" });
     expect(screen.queryByText(/自动合并/)).toBeNull();
+  });
+
+  it("says the platform will not merge, in merge order, on a manual project", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      delivery(
+        {
+          policy: "manual",
+          willMerge: false,
+          mergeAt: null,
+          reason: "项目合并策略不是 auto-improvement",
+          event: null,
+        },
+        { state: "awaiting-review" },
+        { pullRequests: [openPr] },
+      ),
+    );
+    expect(
+      await screen.findByText(/按这个顺序合并，平台不会合并/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/自动合并/)).toBeNull();
+    expect(screen.queryByText(/平台从不合入/)).toBeNull();
+  });
+
+  it("says the platform will auto-merge when conditions are met, then the existing forecast", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      delivery(
+        {
+          policy: "auto-improvement",
+          willMerge: true,
+          mergeAt: "2026-01-01T00:30:00.000Z",
+          reason: null,
+          event: null,
+        },
+        { state: "awaiting-review" },
+        { pullRequests: [openPr] },
+      ),
+    );
+    expect(
+      await screen.findByText(/按这个顺序合并；满足条件时平台会自动合并/),
+    ).toBeTruthy();
+    expect(screen.getByTestId("auto-merge").textContent).toBe(
+      "将于 08:30 自动合并，在 PR 上写评论即可阻止",
+    );
+    expect(screen.queryByText(/平台从不合入/)).toBeNull();
   });
 
   it("shows when auto-merge will happen, why not, and the result after it ran", async () => {
@@ -2354,6 +2415,7 @@ describe("the six-step bar and nested pages", () => {
     expect(steps("backend")).toEqual([
       "终审通过",
       "终审修复不需要",
+      "返工不需要",
       "Recheck不需要",
       "最终合并不需要",
       "Tidy不需要",
@@ -2362,6 +2424,7 @@ describe("the six-step bar and nested pages", () => {
     expect(steps("frontend")).toEqual([
       "终审需要修复",
       "终审修复运行中",
+      "返工未开始",
       "Recheck未开始",
       "最终合并未开始",
       "Tidy未开始",
@@ -2709,5 +2772,64 @@ describe("a GitLab spec", () => {
     expect(link.getAttribute("href")).toBe(
       "https://gitlab.example/me/shop/-/merge_requests/7",
     );
+  });
+});
+
+describe("the review tab and delivery review link", () => {
+  const openPr = {
+    order: 1,
+    waitsFor: [],
+    repo: "backend",
+    number: 7,
+    url: "https://github.com/me/shop/pull/7",
+    state: "open" as const,
+    draft: false,
+    ci: "none" as const,
+    review: "none" as const,
+    syncError: null,
+  };
+
+  it("adds 审查 to the spec tabs only when the spec has a pull request", async () => {
+    const { unmount } = renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
+    );
+    await screen.findByRole("navigation", { name: "需求页" });
+    expect(screen.queryByRole("link", { name: "审查" })).toBeNull();
+    unmount();
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            pullRequests: [openPr],
+          }),
+        }),
+      }),
+    );
+    expect(
+      (await screen.findByRole("link", { name: "审查" })).getAttribute("href"),
+    ).toBe("/specs/1/review");
+  });
+
+  it("keeps the host PR link and adds 审查代码 on each delivery card", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            pullRequests: [openPr],
+          }),
+        }),
+      }),
+    );
+    const host = await screen.findByRole("link", { name: /backend #7/ });
+    expect(host.getAttribute("href")).toBe("https://github.com/me/shop/pull/7");
+    expect(host.getAttribute("target")).toBe("_blank");
+    expect(
+      screen.getByRole("link", { name: "审查代码" }).getAttribute("href"),
+    ).toBe("/specs/1/review");
   });
 });

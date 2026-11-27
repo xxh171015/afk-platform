@@ -1,4 +1,5 @@
 import {
+  type ChangeRequestState,
   formatDisplayId,
   type HostKind,
   type JobState,
@@ -778,7 +779,7 @@ async function finalRunsOf(pool: pg.Pool, specId: number) {
     `SELECT r.id, r.stage, r.axis, r.result, r.duration_ms, r.started_at, r.finished_at, repo.name AS repo
      FROM runs r JOIN repos repo ON repo.id = r.repo_id
      WHERE r.spec_id = $1 AND r.ticket_id IS NULL
-       AND r.stage IN ('final-review', 'final-fix', 'recheck', 'final-merge', 'final-tidy', 'tidy-merge', 'final-e2e', 'update-branch')
+       AND r.stage IN ('final-review', 'final-fix', 'rework', 'recheck', 'final-merge', 'final-tidy', 'tidy-merge', 'final-e2e', 'update-branch')
      ORDER BY r.id`,
     [specId],
   );
@@ -987,12 +988,52 @@ export async function specView(
     links: (await linksBySpec(pool, specId)) ?? [],
     cleanup: await cleanupJobOf(pool, specId),
     autoMerge: await autoMergeViewOf(pool, specId, now),
+    reviewComments: await reviewCommentCountsOf(pool, specId),
+    latestChangeRequest: await latestChangeRequestOf(pool, specId),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),
       kind: e.kind as string,
     })),
   };
+}
+
+async function reviewCommentCountsOf(
+  pool: Pick<pg.Pool, "query">,
+  specId: number,
+): Promise<{ submitted: number; addressed: number; declined: number }> {
+  const rows = await pool.query<{ state: string; n: string }>(
+    `SELECT state, count(*)::text AS n FROM review_comments
+     WHERE spec_id = $1 AND state IN ('submitted', 'addressed', 'declined')
+     GROUP BY state`,
+    [specId],
+  );
+  const counts = { submitted: 0, addressed: 0, declined: 0 };
+  for (const row of rows.rows) {
+    if (
+      row.state === "submitted" ||
+      row.state === "addressed" ||
+      row.state === "declined"
+    )
+      counts[row.state] = Number(row.n);
+  }
+  return counts;
+}
+
+async function latestChangeRequestOf(
+  pool: Pick<pg.Pool, "query">,
+  specId: number,
+): Promise<{ number: number; state: ChangeRequestState } | null> {
+  const row = (
+    await pool.query<{ number: number; state: ChangeRequestState }>(
+      `SELECT number, state FROM change_requests
+       WHERE spec_id = $1
+       ORDER BY number DESC
+       LIMIT 1`,
+      [specId],
+    )
+  ).rows[0];
+  return row ?? null;
 }
 
 export interface Progress {

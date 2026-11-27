@@ -152,11 +152,18 @@ export function redAccessProblem(
         username?: string;
         message?: string;
         hostKind?: string;
+        missing?: string[];
+        fixUrl?: string;
       }
     | undefined,
 ): string | undefined {
   if (access?.state === "not-member")
     return `${name}: ${access.fix ?? `请项目 Maintainer 把${access.username ? `〈${access.username}〉` : "令牌用户"}加为 Developer`}`;
+  if (access?.state === "missing-permissions") {
+    const missing = (access.missing ?? []).join(", ");
+    const fix = access.fixUrl ?? access.fix ?? "";
+    return `${name}: the GitHub App lacks ${missing}; grant it (whoever runs the platform): ${fix}`.trimEnd();
+  }
   if (access?.state === "error") {
     const detail = access.message ?? "unknown error";
     return access.hostKind === "gitlab"

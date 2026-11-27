@@ -16,6 +16,7 @@ import { createTestDatabase, type TestDatabase } from "./test-db.ts";
 
 const ENTITY_TABLES = [
   "acceptance_packs",
+  "change_requests",
   "code_hosts",
   "doctor_reports",
   "edges",
@@ -32,6 +33,11 @@ const ENTITY_TABLES = [
   "projects",
   "pull_requests",
   "repos",
+  "review_blobs",
+  "review_comments",
+  "review_file_views",
+  "review_files",
+  "review_revisions",
   "runs",
   "specs",
   "ticket_versions",

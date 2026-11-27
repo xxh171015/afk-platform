@@ -15,6 +15,7 @@ describe("queryKeysForInvalidate", () => {
       ["workbench"],
       ["blocked"],
       ["runtime"],
+      ["review"],
     ]);
   });
 
@@ -23,22 +24,26 @@ describe("queryKeysForInvalidate", () => {
       ["workbench"],
       ["blocked"],
       ["runtime"],
+      ["review"],
       ["spec", 3],
       ["specs"],
       ["search"],
       ["projects"],
       ["project"],
+      ["spec", 3, "review"],
     ]);
     expect(queryKeysForInvalidate({ ticketId: 9 })).toEqual([
       ["workbench"],
       ["blocked"],
       ["runtime"],
+      ["review"],
       ["ticket", 9],
     ]);
     expect(queryKeysForInvalidate({ runId: 12 })).toEqual([
       ["workbench"],
       ["blocked"],
       ["runtime"],
+      ["review"],
       ["log", 12],
       ["run", 12],
     ]);
@@ -48,11 +53,13 @@ describe("queryKeysForInvalidate", () => {
       ["workbench"],
       ["blocked"],
       ["runtime"],
+      ["review"],
       ["spec", 3],
       ["specs"],
       ["search"],
       ["projects"],
       ["project"],
+      ["spec", 3, "review"],
       ["ticket", 9],
       ["log", 12],
       ["run", 12],

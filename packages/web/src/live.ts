@@ -21,6 +21,7 @@ export function queryKeysForInvalidate(
     ["workbench"],
     ["blocked"],
     ["runtime"],
+    ["review"],
   ];
   if (payload.specId !== undefined) {
     keys.push(
@@ -29,6 +30,7 @@ export function queryKeysForInvalidate(
       ["search"],
       ["projects"],
       ["project"],
+      ["spec", payload.specId, "review"],
     );
   }
   if (payload.ticketId !== undefined) {

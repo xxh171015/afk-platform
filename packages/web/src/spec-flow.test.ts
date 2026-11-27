@@ -113,6 +113,7 @@ describe("the six-step bar", () => {
       "开 PR",
     );
     expect(flowStepLocation("timeline", "", "运行")).toBeNull();
+    expect(flowStepLocation("review", "", "验收合并")).toBe("验收合并");
     expect(
       flowStepCaption("运行", {
         ticketDone: 1,

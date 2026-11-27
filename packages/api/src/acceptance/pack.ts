@@ -10,6 +10,7 @@ import {
   type HostKind,
   type NeedsDecisionItem,
   REVIEW_AXES,
+  REVIEW_COMMENT_SIDES,
   type ReviewAxis,
 } from "@afk/shared";
 import { z } from "@hono/zod-openapi";
@@ -147,6 +148,22 @@ const RepoSection = z.object({
       }),
     )
     .default([]),
+  // Submitted Review comments for this repo (drafts stay off the pack).
+  reviewComments: z
+    .array(
+      z.object({
+        displayId: z.string(),
+        changeRequest: z.number().int(),
+        path: z.string().nullable(),
+        side: z.enum(REVIEW_COMMENT_SIDES).nullable(),
+        lineStart: z.number().int().nullable(),
+        lineEnd: z.number().int().nullable(),
+        body: z.string(),
+        state: z.enum(["submitted", "addressed", "declined"]),
+        reply: z.string().nullable(),
+      }),
+    )
+    .default([]),
 });
 
 // The integration tickets get a section of their own: the result of each one's last e2e (a rerun before the pull
@@ -226,11 +243,17 @@ export const AcceptancePack = z.object({
     .nullable()
     .optional(),
   agentSeconds: z.number().int(),
-  // Spec-axis needs-human, unfinished deferred, Recheck, and host-check: the front of the pack and of the PR description.
+  // Spec-axis needs-human, unfinished deferred, Recheck, host-check, and declined Review comments: the front of the pack and of the PR description.
   needsDecision: z
     .array(
       z.object({
-        kind: z.enum(["recheck", "needs-human", "deferred", "host-check"]),
+        kind: z.enum([
+          "recheck",
+          "needs-human",
+          "deferred",
+          "host-check",
+          "review-comment",
+        ]),
         id: z.string(),
         source: z.string(),
         text: z.string(),
@@ -418,6 +441,7 @@ export async function buildAcceptancePack(
         decisions: [],
         protectedPathApprovals: [],
         standardsSources: [],
+        reviewComments: [],
       };
       sections.set(repoId, section);
     }
@@ -592,6 +616,43 @@ export async function buildAcceptancePack(
     });
   }
 
+  const comments = await client.query<{
+    id: number;
+    repo_id: number;
+    repo: string;
+    change_request: number;
+    path: string | null;
+    side: "old" | "new" | null;
+    line_start: number | null;
+    line_end: number | null;
+    body: string;
+    state: "submitted" | "addressed" | "declined";
+    reply: string | null;
+  }>(
+    `SELECT c.id, p.repo_id, rp.name AS repo, cr.number AS change_request,
+            c.path, c.side, c.line_start, c.line_end, c.body, c.state, c.reply
+     FROM review_comments c
+     JOIN pull_requests p ON p.id = c.pull_request_id
+     JOIN repos rp ON rp.id = p.repo_id
+     JOIN change_requests cr ON cr.id = c.change_request_id
+     WHERE c.spec_id = $1 AND c.state <> 'draft'
+     ORDER BY c.id`,
+    [specId],
+  );
+  for (const row of comments.rows) {
+    sectionOf(row.repo_id, row.repo).reviewComments.push({
+      displayId: formatDisplayId("comment", row.id),
+      changeRequest: row.change_request,
+      path: row.path,
+      side: row.side,
+      lineStart: row.line_start,
+      lineEnd: row.line_end,
+      body: row.body,
+      state: row.state,
+      reply: row.reply,
+    });
+  }
+
   for (const g of gateRows.rows) {
     const section = [...sections.entries()].find(
       ([id]) => id === g.repo_id,
@@ -679,6 +740,7 @@ async function needsDecisionOf(
     items.map((item) => ({
       ...item,
       source: `${displayId} ${item.stage}`,
+      ...(item.stage === "rework" ? { unruled: true as const } : {}),
     }));
   const decisions = [
     ...log.doneTickets.flatMap((group) =>
@@ -698,7 +760,34 @@ async function needsDecisionOf(
         state: ticket.state,
       })),
     }),
+    ...(await declinedReviewCommentsOf(client, specId)),
   ];
+}
+
+async function declinedReviewCommentsOf(
+  client: Pick<pg.PoolClient, "query">,
+  specId: number,
+): Promise<NeedsDecisionItem[]> {
+  const rows = await client.query<{
+    id: number;
+    repo: string;
+    body: string;
+    reply: string | null;
+  }>(
+    `SELECT c.id, rp.name AS repo, c.body, c.reply
+     FROM review_comments c
+     JOIN pull_requests p ON p.id = c.pull_request_id
+     JOIN repos rp ON rp.id = p.repo_id
+     WHERE c.spec_id = $1 AND c.state = 'declined'
+     ORDER BY c.id`,
+    [specId],
+  );
+  return rows.rows.map((row) => ({
+    kind: "review-comment" as const,
+    id: formatDisplayId("comment", row.id),
+    source: row.repo,
+    text: row.reply ?? row.body,
+  }));
 }
 
 async function hostCheckNeedsDecisionOf(
@@ -750,7 +839,7 @@ async function recheckNeedsDecisionOf(
   }>(
     `SELECT id, stage, ticket_id, repo_id, result, output FROM runs
      WHERE spec_id = $1 AND (
-       (stage IN ('review-fix', 'merge-fix', 'final-fix', 'update-branch')
+       (stage IN ('review-fix', 'merge-fix', 'final-fix', 'rework', 'update-branch')
          AND output->'recheck'->>'hit' = 'true')
        OR stage = 'recheck'
      )
@@ -1062,6 +1151,7 @@ function coerceStoredPack(raw: unknown): AcceptancePack | null {
         decisions: storedDecisions(repo),
         protectedPathApprovals: asArray(repo.protectedPathApprovals as never[]),
         standardsSources: asArray(repo.standardsSources as never[]),
+        reviewComments: asArray(repo.reviewComments as never[]),
       };
     }),
   };

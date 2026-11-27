@@ -35,13 +35,32 @@ export {
   parseMergePolicy,
   storedMergePolicy,
 } from "./auto-merge.ts";
-export { committedShasFromBlame, UNCOMMITTED_SHA } from "./blame.ts";
+export type { BlameLine } from "./blame.ts";
+export {
+  blameLinesFromPorcelain,
+  committedShasFromBlame,
+  UNCOMMITTED_SHA,
+} from "./blame.ts";
 export {
   branchNames,
   isPlatformBranch,
   parseTicketBranch,
   SETUP_BRANCH,
 } from "./branches.ts";
+export type {
+  ChangeRequestState,
+  StaleReviewDraft,
+} from "./change-requests.ts";
+export {
+  CHANGE_REQUEST_IN_REWORK,
+  CHANGE_REQUEST_NO_DRAFTS,
+  CHANGE_REQUEST_NOT_AWAITING,
+  CHANGE_REQUEST_PR_NOT_OPEN,
+  CHANGE_REQUEST_STATES,
+  changeRequestBlockedMessage,
+  changeRequestPartiallyMergedMessage,
+  staleChangeRequestPrompt,
+} from "./change-requests.ts";
 export type {
   DecisionLog,
   DecisionLogGroup,
@@ -200,6 +219,7 @@ export {
   MERGE_NOTE_MARK_START,
   PACK_MARK_END,
   PACK_MARK_START,
+  REVIEW_NOTE_MARKER,
   spliceMergeNote,
   splicePackSection,
   wrapMergeNote,
@@ -246,6 +266,40 @@ export {
   reviewAxisLabel,
   TICKET_REVIEW_MODES,
 } from "./review-axes.ts";
+export type {
+  ReviewCommentSide,
+  ReviewCommentState,
+} from "./review-comments.ts";
+export {
+  REVIEW_COMMENT_BODY_MAX,
+  REVIEW_COMMENT_SIDES,
+  REVIEW_COMMENT_STATES,
+} from "./review-comments.ts";
+export type {
+  ReviewAttribution,
+  ReviewBlob,
+  ReviewFile,
+  ReviewFileStatus,
+  ReviewHunk,
+  ReviewPatchOmittedReason,
+  ReviewRevisionOmittedReason,
+  ReviewRevisionResult,
+  ReviewRevisionState,
+} from "./review-revision.ts";
+export {
+  applyReviewRevisionLimits,
+  chunkReviewRevisionResult,
+  isLockfilePath,
+  isTestPath,
+  LOCKFILE_NAMES,
+  MAX_REVIEW_REVISION_COMPLETE_BYTES,
+  REVIEW_FILE_STATUSES,
+  REVIEW_PATCH_OMITTED_REASONS,
+  REVIEW_REVISION_LIMITS,
+  REVIEW_REVISION_OMITTED_REASONS,
+  REVIEW_REVISION_STATES,
+  ReviewRevisionResultSchema,
+} from "./review-revision.ts";
 export type { NeedsDecisionItem, Ruling, RulingVerdict } from "./rulings.ts";
 export {
   checkReviewRulings,

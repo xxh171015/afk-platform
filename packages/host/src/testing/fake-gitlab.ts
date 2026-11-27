@@ -22,7 +22,13 @@ interface FakeMr {
   approvedBy: string[];
   reviewers: { username: string; state: string }[];
   hasConflicts: boolean;
-  notes: { body: string; system: boolean; username: string; bot: boolean }[];
+  notes: {
+    id: number;
+    body: string;
+    system: boolean;
+    username: string;
+    bot: boolean;
+  }[];
 }
 
 export class FakeGitLab {
@@ -43,7 +49,9 @@ export class FakeGitLab {
   mergeAccessLevel = 40;
   tokenExpiresAt: string | null = null;
   hideTokenExpiry = false;
+  refuseNotes = false;
   readonly files = new Set<string>();
+  private nextNoteId = 1;
   readonly branchFiles = new Map<string, Set<string>>();
   private readonly branchShas = new Map<string, string>();
   readonly missingBranches = new Set<string>();
@@ -147,11 +155,16 @@ export class FakeGitLab {
     note: { body: string; system?: boolean; username: string; bot?: boolean },
   ): void {
     this.mr(iid).notes.push({
+      id: this.nextNoteId++,
       body: note.body,
       system: note.system === true,
       username: note.username,
       bot: note.bot === true,
     });
+  }
+
+  notesOf(iid: number): FakeMr["notes"] {
+    return [...this.mr(iid).notes];
   }
 
   private mr(iid: number): FakeMr {
@@ -162,6 +175,15 @@ export class FakeGitLab {
 
   private draft(title: string): boolean {
     return /^draft:/i.test(title.trim());
+  }
+
+  private renderNote(row: FakeMr["notes"][number]) {
+    return {
+      id: row.id,
+      body: row.body,
+      system: row.system,
+      author: { username: row.username, bot: row.bot },
+    };
   }
 
   private render(mr: FakeMr) {
@@ -355,12 +377,34 @@ export class FakeGitLab {
       return this.json(
         res,
         200,
-        mr.notes.map((row) => ({
-          body: row.body,
-          system: row.system,
-          author: { username: row.username, bot: row.bot },
-        })),
+        mr.notes.map((row) => this.renderNote(row)),
       );
+    }
+    if (notes && req.method === "POST") {
+      if (this.refuseNotes)
+        return this.json(res, 403, { message: "403 Forbidden" });
+      const mr = this.mrs.find((m) => m.iid === Number(notes[1]));
+      if (!mr) return this.json(res, 404, { message: "404 Not found" });
+      const row = {
+        id: this.nextNoteId++,
+        body: String(body.body ?? ""),
+        system: false,
+        username: this.username,
+        bot: false,
+      };
+      mr.notes.push(row);
+      return this.json(res, 201, this.renderNote(row));
+    }
+    const oneNote = /^\/merge_requests\/(\d+)\/notes\/(\d+)$/.exec(rest);
+    if (oneNote && req.method === "PUT") {
+      if (this.refuseNotes)
+        return this.json(res, 403, { message: "403 Forbidden" });
+      const mr = this.mrs.find((m) => m.iid === Number(oneNote[1]));
+      const found = mr?.notes.find((row) => row.id === Number(oneNote[2]));
+      if (!mr || !found)
+        return this.json(res, 404, { message: "404 Not found" });
+      found.body = String(body.body ?? found.body);
+      return this.json(res, 200, this.renderNote(found));
     }
 
     const merge = /^\/merge_requests\/(\d+)\/merge$/.exec(rest);

@@ -321,8 +321,89 @@ export function createGitLabAdapter(options: GitLabOptions): HostAdapter {
     });
   };
 
+  const upsertPlatformComment: HostAdapter["upsertPlatformComment"] = async ({
+    repo,
+    number,
+    marker,
+    body,
+  }) => {
+    const notes: {
+      id?: number;
+      body?: string;
+      system?: boolean;
+      author?: RawUser | null;
+    }[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const { status, body: listed } = await call(
+        repo,
+        "GET",
+        `/merge_requests/${number}/notes?per_page=100&page=${page}`,
+      );
+      if (status !== 200)
+        throw new HostError(
+          `GitLab answered ${status} listing notes on pull request ${number}`,
+          status,
+        );
+      const batch = Array.isArray(listed)
+        ? (listed as {
+            id?: number;
+            body?: string;
+            system?: boolean;
+            author?: RawUser | null;
+          }[])
+        : [];
+      notes.push(...batch);
+      if (batch.length < 100) break;
+      if (page === 50)
+        throw new HostError(
+          `GitLab has more than 5000 notes for ${repo.owner}/${repo.name} pull request ${number}; not judging by the first of them`,
+          200,
+        );
+    }
+    const me = await tokenUsername(repo);
+    const existing = notes.find(
+      (note) =>
+        note.system !== true &&
+        typeof note.id === "number" &&
+        typeof note.body === "string" &&
+        note.body.includes(marker) &&
+        usernameOf(note.author) === me,
+    );
+    if (existing && typeof existing.id === "number") {
+      const updated = await call(
+        repo,
+        "PUT",
+        `/merge_requests/${number}/notes/${existing.id}`,
+        { body },
+      );
+      if (updated.status !== 200)
+        throw new HostError(
+          `GitLab answered ${updated.status} updating the review-notes comment on pull request ${number}`,
+          updated.status,
+        );
+      return { id: String(existing.id) };
+    }
+    const created = await call(
+      repo,
+      "POST",
+      `/merge_requests/${number}/notes`,
+      { body },
+    );
+    const id = (created.body as { id?: unknown } | null)?.id;
+    if (
+      (created.status !== 201 && created.status !== 200) ||
+      typeof id !== "number"
+    )
+      throw new HostError(
+        `GitLab answered ${created.status} creating the review-notes comment on pull request ${number}`,
+        created.status,
+      );
+    return { id: String(id) };
+  };
+
   return {
     getPullRequest,
+    upsertPlatformComment,
     async getBranchSha({ repo, branch }) {
       const path = `/repository/branches/${encodeURIComponent(branch)}`;
       const read = await call(repo, "GET", path);

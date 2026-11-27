@@ -4148,6 +4148,52 @@
                         "required": ["id", "ticket", "run", "body"]
                       }
                     },
+                    "reviewComments": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "changeRequest": {
+                          "type": "integer"
+                        },
+                        "currentHead": {
+                          "type": "string"
+                        },
+                        "comments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "writtenOn": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": ["string", "null"]
+                              },
+                              "side": {
+                                "type": ["string", "null"],
+                                "enum": ["old", "new", null]
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "integer"
+                                }
+                              },
+                              "excerpt": {
+                                "type": "string"
+                              },
+                              "body": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["id", "writtenOn", "path", "body"]
+                          }
+                        }
+                      },
+                      "required": ["changeRequest", "currentHead", "comments"]
+                    },
                     "handbackResolve": {
                       "type": "boolean"
                     }
@@ -4180,7 +4226,8 @@
                     "ticketReview",
                     "stageModels",
                     "recheck",
-                    "uncertainties"
+                    "uncertainties",
+                    "reviewComments"
                   ]
                 }
               }
@@ -4257,7 +4304,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge, review-revision or review-note job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -4558,6 +4605,70 @@
                         "number",
                         "expectedHeadSha",
                         "section"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["review-revision"]
+                        },
+                        "pullId": {
+                          "type": "integer"
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "repoName": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        },
+                        "headSha": {
+                          "type": "string"
+                        },
+                        "previousHeadSha": {
+                          "type": ["string", "null"]
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "pullId",
+                        "repoUrl",
+                        "repoName",
+                        "defaultBranch",
+                        "headSha",
+                        "previousHeadSha"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["review-note"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "type": "integer"
+                        },
+                        "marker": {
+                          "type": "string"
+                        },
+                        "body": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "number",
+                        "marker",
+                        "body"
                       ]
                     }
                   ]
@@ -7979,6 +8090,59 @@
                                   ]
                                 },
                                 "default": []
+                              },
+                              "reviewComments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "displayId": {
+                                      "type": "string"
+                                    },
+                                    "changeRequest": {
+                                      "type": "integer"
+                                    },
+                                    "path": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "side": {
+                                      "type": ["string", "null"],
+                                      "enum": ["old", "new", null]
+                                    },
+                                    "lineStart": {
+                                      "type": ["integer", "null"]
+                                    },
+                                    "lineEnd": {
+                                      "type": ["integer", "null"]
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "enum": [
+                                        "submitted",
+                                        "addressed",
+                                        "declined"
+                                      ]
+                                    },
+                                    "reply": {
+                                      "type": ["string", "null"]
+                                    }
+                                  },
+                                  "required": [
+                                    "displayId",
+                                    "changeRequest",
+                                    "path",
+                                    "side",
+                                    "lineStart",
+                                    "lineEnd",
+                                    "body",
+                                    "state",
+                                    "reply"
+                                  ]
+                                },
+                                "default": []
                               }
                             },
                             "required": [
@@ -8199,7 +8363,8 @@
                                   "recheck",
                                   "needs-human",
                                   "deferred",
-                                  "host-check"
+                                  "host-check",
+                                  "review-comment"
                                 ]
                               },
                               "id": {
@@ -8542,6 +8707,34 @@
                         "reason",
                         "event"
                       ]
+                    },
+                    "reviewComments": {
+                      "type": "object",
+                      "properties": {
+                        "submitted": {
+                          "type": "integer"
+                        },
+                        "addressed": {
+                          "type": "integer"
+                        },
+                        "declined": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["submitted", "addressed", "declined"]
+                    },
+                    "latestChangeRequest": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "number": {
+                          "type": "integer"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": ["active", "done", "superseded"]
+                        }
+                      },
+                      "required": ["number", "state"]
                     }
                   },
                   "required": [
@@ -8561,7 +8754,9 @@
                     "links",
                     "usageByStage",
                     "cleanup",
-                    "autoMerge"
+                    "autoMerge",
+                    "reviewComments",
+                    "latestChangeRequest"
                   ]
                 }
               }
@@ -12216,6 +12411,119 @@
         }
       }
     },
+    "/specs/{id}/change-requests": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "acknowledgeStale": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The drafts are one Change request; repos with comments start Rework",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["active", "done", "superseded"]
+                    },
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["id", "number", "state", "comments"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec cannot take a Change request, or drafts were written on an older Review revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "stale": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "writtenOn": {
+                            "type": "string"
+                          },
+                          "currentHead": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["displayId", "writtenOn", "currentHead"]
+                      }
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/specs/{id}/cleanup": {
       "post": {
         "parameters": [
@@ -12266,6 +12574,3382 @@
           },
           "409": {
             "description": "The spec is not cancelled or merged, or a clean-up of it is already waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/review-queue": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": false,
+            "name": "project",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Specs waiting for review, grouped and ordered by risk tags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "waitingForYou": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "spec": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              },
+                              "project": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "title",
+                              "type",
+                              "state",
+                              "project"
+                            ]
+                          },
+                          "repos": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
+                          "pullRequestCount": {
+                            "type": "integer"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "additions": {
+                            "type": "integer"
+                          },
+                          "deletions": {
+                            "type": "integer"
+                          },
+                          "viewedCount": {
+                            "type": ["integer", "null"]
+                          },
+                          "filesCount": {
+                            "type": ["integer", "null"]
+                          },
+                          "ci": {
+                            "type": "string",
+                            "enum": ["none", "pending", "success", "failure"]
+                          },
+                          "conflictsWithDefault": {
+                            "type": "boolean"
+                          },
+                          "autoMergeLine": {
+                            "type": ["string", "null"]
+                          },
+                          "riskTags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "spec",
+                          "repos",
+                          "hostKind",
+                          "pullRequestCount",
+                          "waitingSince",
+                          "additions",
+                          "deletions",
+                          "viewedCount",
+                          "filesCount",
+                          "ci",
+                          "conflictsWithDefault",
+                          "autoMergeLine",
+                          "riskTags"
+                        ]
+                      }
+                    },
+                    "inProgress": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "spec": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              },
+                              "project": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "title",
+                              "type",
+                              "state",
+                              "project"
+                            ]
+                          },
+                          "repos": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
+                          "pullRequestCount": {
+                            "type": "integer"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "additions": {
+                            "type": "integer"
+                          },
+                          "deletions": {
+                            "type": "integer"
+                          },
+                          "viewedCount": {
+                            "type": ["integer", "null"]
+                          },
+                          "filesCount": {
+                            "type": ["integer", "null"]
+                          },
+                          "ci": {
+                            "type": "string",
+                            "enum": ["none", "pending", "success", "failure"]
+                          },
+                          "conflictsWithDefault": {
+                            "type": "boolean"
+                          },
+                          "autoMergeLine": {
+                            "type": ["string", "null"]
+                          },
+                          "riskTags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "spec",
+                          "repos",
+                          "hostKind",
+                          "pullRequestCount",
+                          "waitingSince",
+                          "additions",
+                          "deletions",
+                          "viewedCount",
+                          "filesCount",
+                          "ci",
+                          "conflictsWithDefault",
+                          "autoMergeLine",
+                          "riskTags"
+                        ]
+                      }
+                    },
+                    "inRework": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "spec": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              },
+                              "project": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "title",
+                              "type",
+                              "state",
+                              "project"
+                            ]
+                          },
+                          "repos": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
+                          "pullRequestCount": {
+                            "type": "integer"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "additions": {
+                            "type": "integer"
+                          },
+                          "deletions": {
+                            "type": "integer"
+                          },
+                          "viewedCount": {
+                            "type": ["integer", "null"]
+                          },
+                          "filesCount": {
+                            "type": ["integer", "null"]
+                          },
+                          "ci": {
+                            "type": "string",
+                            "enum": ["none", "pending", "success", "failure"]
+                          },
+                          "conflictsWithDefault": {
+                            "type": "boolean"
+                          },
+                          "autoMergeLine": {
+                            "type": ["string", "null"]
+                          },
+                          "riskTags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "spec",
+                          "repos",
+                          "hostKind",
+                          "pullRequestCount",
+                          "waitingSince",
+                          "additions",
+                          "deletions",
+                          "viewedCount",
+                          "filesCount",
+                          "ci",
+                          "conflictsWithDefault",
+                          "autoMergeLine",
+                          "riskTags"
+                        ]
+                      }
+                    },
+                    "readyToMerge": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "spec": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              },
+                              "project": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "title",
+                              "type",
+                              "state",
+                              "project"
+                            ]
+                          },
+                          "repos": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
+                          "pullRequestCount": {
+                            "type": "integer"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "additions": {
+                            "type": "integer"
+                          },
+                          "deletions": {
+                            "type": "integer"
+                          },
+                          "viewedCount": {
+                            "type": ["integer", "null"]
+                          },
+                          "filesCount": {
+                            "type": ["integer", "null"]
+                          },
+                          "ci": {
+                            "type": "string",
+                            "enum": ["none", "pending", "success", "failure"]
+                          },
+                          "conflictsWithDefault": {
+                            "type": "boolean"
+                          },
+                          "autoMergeLine": {
+                            "type": ["string", "null"]
+                          },
+                          "riskTags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "spec",
+                          "repos",
+                          "hostKind",
+                          "pullRequestCount",
+                          "waitingSince",
+                          "additions",
+                          "deletions",
+                          "viewedCount",
+                          "filesCount",
+                          "ci",
+                          "conflictsWithDefault",
+                          "autoMergeLine",
+                          "riskTags"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "waitingForYou",
+                    "inProgress",
+                    "inRework",
+                    "readyToMerge"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/review": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "This spec's pull requests, Review revisions, merge checklist, tickets and Findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "spec": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "planned",
+                            "running",
+                            "finalizing",
+                            "awaiting-review",
+                            "partially-merged",
+                            "reworking",
+                            "merged",
+                            "paused",
+                            "cancelled"
+                          ]
+                        }
+                      },
+                      "required": ["id", "displayId", "title", "type", "state"]
+                    },
+                    "userStories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "number": {
+                            "type": "integer"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["number", "text"]
+                      }
+                    },
+                    "pullRequests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "number": {
+                            "type": "integer"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": ["open", "closed", "merged"]
+                          },
+                          "draft": {
+                            "type": "boolean"
+                          },
+                          "ci": {
+                            "type": "string",
+                            "enum": ["none", "pending", "success", "failure"]
+                          },
+                          "review": {
+                            "type": "string",
+                            "enum": ["none", "approved", "changes-requested"]
+                          },
+                          "headSha": {
+                            "type": "string"
+                          },
+                          "conflictsWithDefault": {
+                            "type": "boolean"
+                          },
+                          "humanComments": {
+                            "type": ["integer", "null"]
+                          },
+                          "reviewNoteError": {
+                            "type": ["string", "null"]
+                          },
+                          "revision": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": ["integer", "null"]
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": ["pending", "ready", "failed"]
+                              },
+                              "complete": {
+                                "type": "boolean"
+                              },
+                              "filesCount": {
+                                "type": "integer"
+                              },
+                              "additions": {
+                                "type": "integer"
+                              },
+                              "deletions": {
+                                "type": "integer"
+                              },
+                              "viewedCount": {
+                                "type": "integer"
+                              },
+                              "commentCount": {
+                                "type": "integer"
+                              },
+                              "error": {
+                                "type": ["string", "null"]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "state",
+                              "complete",
+                              "filesCount",
+                              "additions",
+                              "deletions",
+                              "viewedCount",
+                              "commentCount",
+                              "error"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repo",
+                          "number",
+                          "url",
+                          "state",
+                          "draft",
+                          "ci",
+                          "review",
+                          "headSha",
+                          "conflictsWithDefault",
+                          "humanComments",
+                          "reviewNoteError",
+                          "revision"
+                        ]
+                      }
+                    },
+                    "acceptancePack": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "generatedAt": {
+                          "type": "string"
+                        },
+                        "mergeOrder": {
+                          "type": "object",
+                          "properties": {
+                            "ordered": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "after": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "unordered": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": ["ordered", "after", "unordered"]
+                        },
+                        "orderBroken": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repo": {
+                                "type": "string"
+                              },
+                              "skipped": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["repo", "skipped"]
+                          }
+                        },
+                        "hostKind": {
+                          "type": "string",
+                          "enum": ["github", "gitlab"]
+                        },
+                        "repos": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repo": {
+                                "type": "string"
+                              },
+                              "pullRequest": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "order": {
+                                    "type": "integer"
+                                  },
+                                  "waitsFor": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "default": []
+                                  },
+                                  "repo": {
+                                    "type": "string"
+                                  },
+                                  "number": {
+                                    "type": "integer"
+                                  },
+                                  "url": {
+                                    "type": "string"
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": ["open", "closed", "merged"]
+                                  },
+                                  "draft": {
+                                    "type": "boolean"
+                                  },
+                                  "ci": {
+                                    "type": "string",
+                                    "enum": [
+                                      "none",
+                                      "pending",
+                                      "success",
+                                      "failure"
+                                    ]
+                                  },
+                                  "review": {
+                                    "type": "string",
+                                    "enum": [
+                                      "none",
+                                      "approved",
+                                      "changes-requested"
+                                    ]
+                                  },
+                                  "syncError": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "hostKind": {
+                                    "type": "string",
+                                    "enum": ["github", "gitlab"]
+                                  }
+                                },
+                                "required": [
+                                  "order",
+                                  "repo",
+                                  "number",
+                                  "url",
+                                  "state",
+                                  "draft",
+                                  "ci",
+                                  "review",
+                                  "syncError"
+                                ]
+                              },
+                              "gate": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "commitSha": {
+                                    "type": "string"
+                                  },
+                                  "testsTotal": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "testsSkipped": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "durationMs": {
+                                    "type": "integer"
+                                  },
+                                  "steps": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "exitCode": {
+                                          "type": "integer"
+                                        },
+                                        "ms": {
+                                          "type": "integer"
+                                        }
+                                      },
+                                      "required": ["name", "exitCode", "ms"]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "commitSha",
+                                  "testsTotal",
+                                  "testsSkipped",
+                                  "durationMs",
+                                  "steps"
+                                ]
+                              },
+                              "flakyTests": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "classname": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["name", "classname"]
+                                },
+                                "default": []
+                              },
+                              "tickets": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "displayId": {
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "appended": {
+                                      "type": "boolean"
+                                    },
+                                    "criteria": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "text": {
+                                            "type": "string"
+                                          },
+                                          "tests": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "status": {
+                                            "type": "string",
+                                            "enum": ["verified", "unverified"]
+                                          },
+                                          "reason": {
+                                            "type": ["string", "null"]
+                                          }
+                                        },
+                                        "required": [
+                                          "text",
+                                          "tests",
+                                          "status",
+                                          "reason"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "displayId",
+                                    "title",
+                                    "appended",
+                                    "criteria"
+                                  ]
+                                }
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "resolution": {
+                                      "type": "string"
+                                    },
+                                    "axis": {
+                                      "type": ["string", "null"],
+                                      "enum": ["standards", "spec", null]
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "kind",
+                                    "body",
+                                    "resolution",
+                                    "axis"
+                                  ]
+                                }
+                              },
+                              "scopeCreep": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["ticket", "run", "body"]
+                                }
+                              },
+                              "reviewUncertainties": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "axis": {
+                                      "type": ["string", "null"],
+                                      "enum": ["standards", "spec", null]
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "body",
+                                    "axis"
+                                  ]
+                                }
+                              },
+                              "resolvedUncertainties": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "axis": {
+                                      "type": ["string", "null"],
+                                      "enum": ["standards", "spec", null]
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "body",
+                                    "axis"
+                                  ]
+                                },
+                                "default": []
+                              },
+                              "decisions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "type": "string"
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "choice",
+                                        "conflict",
+                                        "known-gap",
+                                        "deferred",
+                                        "workaround"
+                                      ]
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "ref": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["source", "run", "kind", "text"]
+                                }
+                              },
+                              "protectedPathApprovals": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": "string"
+                                    },
+                                    "paths": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": ["ticket", "paths"]
+                                }
+                              },
+                              "standardsSources": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "sources": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "sources"
+                                  ]
+                                },
+                                "default": []
+                              },
+                              "reviewComments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "displayId": {
+                                      "type": "string"
+                                    },
+                                    "changeRequest": {
+                                      "type": "integer"
+                                    },
+                                    "path": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "side": {
+                                      "type": ["string", "null"],
+                                      "enum": ["old", "new", null]
+                                    },
+                                    "lineStart": {
+                                      "type": ["integer", "null"]
+                                    },
+                                    "lineEnd": {
+                                      "type": ["integer", "null"]
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "enum": [
+                                        "submitted",
+                                        "addressed",
+                                        "declined"
+                                      ]
+                                    },
+                                    "reply": {
+                                      "type": ["string", "null"]
+                                    }
+                                  },
+                                  "required": [
+                                    "displayId",
+                                    "changeRequest",
+                                    "path",
+                                    "side",
+                                    "lineStart",
+                                    "lineEnd",
+                                    "body",
+                                    "state",
+                                    "reply"
+                                  ]
+                                },
+                                "default": []
+                              }
+                            },
+                            "required": [
+                              "repo",
+                              "pullRequest",
+                              "gate",
+                              "tickets",
+                              "findings",
+                              "scopeCreep",
+                              "reviewUncertainties",
+                              "decisions",
+                              "protectedPathApprovals"
+                            ]
+                          }
+                        },
+                        "integration": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "failedBeforePullRequest": {
+                              "type": ["object", "null"],
+                              "properties": {
+                                "tickets": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "displayId": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "e2e": {
+                                        "type": "object",
+                                        "properties": {
+                                          "displayId": {
+                                            "type": "string"
+                                          },
+                                          "result": {
+                                            "type": ["string", "null"]
+                                          }
+                                        },
+                                        "required": ["displayId", "result"]
+                                      },
+                                      "diagnosis": {
+                                        "type": ["object", "null"],
+                                        "properties": {
+                                          "failingRepo": {
+                                            "type": ["string", "null"]
+                                          },
+                                          "evidence": {
+                                            "type": "string"
+                                          },
+                                          "failingTests": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "required": [
+                                          "failingRepo",
+                                          "evidence",
+                                          "failingTests"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "displayId",
+                                      "title",
+                                      "e2e",
+                                      "diagnosis"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": ["tickets"]
+                            },
+                            "tickets": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "displayId": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "repo": {
+                                    "type": "string"
+                                  },
+                                  "appended": {
+                                    "type": "boolean"
+                                  },
+                                  "result": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "runDisplayId": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "testsTotal": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "testsFailed": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "envUpMs": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "refShas": {
+                                    "type": ["object", "null"],
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "headSha": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "criteria": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "text": {
+                                          "type": "string"
+                                        },
+                                        "tests": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "status": {
+                                          "type": "string",
+                                          "enum": ["verified", "unverified"]
+                                        },
+                                        "reason": {
+                                          "type": ["string", "null"]
+                                        }
+                                      },
+                                      "required": [
+                                        "text",
+                                        "tests",
+                                        "status",
+                                        "reason"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "displayId",
+                                  "title",
+                                  "repo",
+                                  "appended",
+                                  "result",
+                                  "runDisplayId",
+                                  "testsTotal",
+                                  "testsFailed",
+                                  "envUpMs",
+                                  "refShas",
+                                  "headSha",
+                                  "criteria"
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["failedBeforePullRequest", "tickets"]
+                        },
+                        "cancelledTickets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "repo": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["displayId", "title", "repo"]
+                          }
+                        },
+                        "planningDocs": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "repo": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": ["committed", "unchanged", "waived"]
+                            },
+                            "leftOut": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": ["repo", "state"]
+                        },
+                        "agentSeconds": {
+                          "type": "integer"
+                        },
+                        "needsDecision": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "recheck",
+                                  "needs-human",
+                                  "deferred",
+                                  "host-check",
+                                  "review-comment"
+                                ]
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "text": {
+                                "type": "string"
+                              },
+                              "ref": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["kind", "id", "source", "text"]
+                          },
+                          "default": []
+                        }
+                      },
+                      "required": [
+                        "generatedAt",
+                        "mergeOrder",
+                        "orderBroken",
+                        "repos",
+                        "cancelledTickets",
+                        "agentSeconds"
+                      ]
+                    },
+                    "autoMerge": {
+                      "type": "object",
+                      "properties": {
+                        "policy": {
+                          "type": "string",
+                          "enum": ["manual", "auto-improvement"]
+                        },
+                        "willMerge": {
+                          "type": "boolean"
+                        },
+                        "mergeAt": {
+                          "type": ["string", "null"]
+                        },
+                        "reason": {
+                          "type": ["string", "null"]
+                        },
+                        "event": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["auto-merged", "auto-merge-failed"]
+                            },
+                            "reason": {
+                              "type": ["string", "null"]
+                            }
+                          },
+                          "required": ["type", "reason"]
+                        }
+                      },
+                      "required": [
+                        "policy",
+                        "willMerge",
+                        "mergeAt",
+                        "reason",
+                        "event"
+                      ]
+                    },
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "stories": {
+                            "type": "array",
+                            "items": {
+                              "type": "integer"
+                            }
+                          },
+                          "criteria": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "text": {
+                                  "type": "string"
+                                },
+                                "tests": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["verified", "unverified"]
+                                },
+                                "reason": {
+                                  "type": ["string", "null"]
+                                }
+                              },
+                              "required": ["text", "tests", "status", "reason"]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "title",
+                          "stories",
+                          "criteria"
+                        ]
+                      }
+                    },
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "ticket": {
+                            "type": ["string", "null"]
+                          },
+                          "run": {
+                            "type": "string"
+                          },
+                          "stage": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "resolution": {
+                            "type": "string"
+                          },
+                          "axis": {
+                            "type": ["string", "null"],
+                            "enum": ["standards", "spec", null]
+                          }
+                        },
+                        "required": [
+                          "ticket",
+                          "run",
+                          "stage",
+                          "kind",
+                          "body",
+                          "resolution",
+                          "axis"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "spec",
+                    "userStories",
+                    "pullRequests",
+                    "acceptancePack",
+                    "autoMerge",
+                    "tickets",
+                    "findings"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/review-revisions/{id}/guide": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Review guide assembled for this Review revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revisionId": {
+                      "type": "integer"
+                    },
+                    "unattributedCount": {
+                      "type": "integer"
+                    },
+                    "spec": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "userStories": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "number": {
+                                "type": "integer"
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["number", "text"]
+                          }
+                        },
+                        "sourceSpec": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "id": {
+                              "type": "integer"
+                            },
+                            "displayId": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "displayId", "title"]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayId",
+                        "title",
+                        "type",
+                        "userStories",
+                        "sourceSpec"
+                      ]
+                    },
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "appended": {
+                            "type": "boolean"
+                          },
+                          "stories": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "number": {
+                                  "type": "integer"
+                                },
+                                "text": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["number", "text"]
+                            }
+                          },
+                          "criteria": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "text": {
+                                  "type": "string"
+                                },
+                                "tests": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["verified", "unverified"]
+                                },
+                                "reason": {
+                                  "type": ["string", "null"]
+                                }
+                              },
+                              "required": ["text", "tests", "status", "reason"]
+                            }
+                          },
+                          "summaries": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "run": {
+                                  "type": "string"
+                                },
+                                "stage": {
+                                  "type": "string"
+                                },
+                                "summary": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["run", "stage", "summary"]
+                            }
+                          },
+                          "decisions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "choice",
+                                    "conflict",
+                                    "known-gap",
+                                    "deferred",
+                                    "workaround"
+                                  ]
+                                },
+                                "text": {
+                                  "type": "string"
+                                },
+                                "ref": {
+                                  "type": "string"
+                                },
+                                "run": {
+                                  "type": "string"
+                                },
+                                "stage": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["id", "kind", "text", "run", "stage"]
+                            }
+                          },
+                          "rulings": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "verdict": {
+                                  "type": "string",
+                                  "enum": [
+                                    "accepted",
+                                    "must-fix",
+                                    "needs-human"
+                                  ]
+                                }
+                              },
+                              "required": ["id", "verdict"]
+                            }
+                          },
+                          "hunks": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "fileId": {
+                                  "type": "integer"
+                                },
+                                "path": {
+                                  "type": "string"
+                                },
+                                "newStart": {
+                                  "type": "integer"
+                                },
+                                "newLines": {
+                                  "type": "integer"
+                                },
+                                "oldStart": {
+                                  "type": "integer"
+                                },
+                                "oldLines": {
+                                  "type": "integer"
+                                },
+                                "lines": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "fileId",
+                                "path",
+                                "newStart",
+                                "newLines",
+                                "oldStart",
+                                "oldLines",
+                                "lines"
+                              ]
+                            }
+                          },
+                          "viewed": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "title",
+                          "appended",
+                          "stories",
+                          "criteria",
+                          "summaries",
+                          "decisions",
+                          "rulings",
+                          "hunks",
+                          "viewed"
+                        ]
+                      }
+                    },
+                    "otherRepoTickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "pullRequestId": {
+                            "type": ["integer", "null"]
+                          }
+                        },
+                        "required": [
+                          "displayId",
+                          "title",
+                          "repo",
+                          "pullRequestId"
+                        ]
+                      }
+                    },
+                    "wrapUp": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "stage": {
+                            "type": "string",
+                            "enum": ["final-fix", "final-tidy", "update-branch"]
+                          },
+                          "summaries": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "run": {
+                                  "type": "string"
+                                },
+                                "stage": {
+                                  "type": "string"
+                                },
+                                "summary": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["run", "stage", "summary"]
+                            }
+                          },
+                          "hunks": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "fileId": {
+                                  "type": "integer"
+                                },
+                                "path": {
+                                  "type": "string"
+                                },
+                                "newStart": {
+                                  "type": "integer"
+                                },
+                                "newLines": {
+                                  "type": "integer"
+                                },
+                                "oldStart": {
+                                  "type": "integer"
+                                },
+                                "oldLines": {
+                                  "type": "integer"
+                                },
+                                "lines": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "fileId",
+                                "path",
+                                "newStart",
+                                "newLines",
+                                "oldStart",
+                                "oldLines",
+                                "lines"
+                              ]
+                            }
+                          },
+                          "viewed": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["stage", "summaries", "hunks", "viewed"]
+                      }
+                    },
+                    "changeRequests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "number": {
+                            "type": "integer"
+                          },
+                          "comments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "displayId": {
+                                  "type": "string"
+                                },
+                                "body": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["displayId", "body"]
+                            }
+                          },
+                          "dispositions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "displayId": {
+                                  "type": "string"
+                                },
+                                "result": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["displayId", "result"]
+                            }
+                          },
+                          "hunks": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "fileId": {
+                                  "type": "integer"
+                                },
+                                "path": {
+                                  "type": "string"
+                                },
+                                "newStart": {
+                                  "type": "integer"
+                                },
+                                "newLines": {
+                                  "type": "integer"
+                                },
+                                "oldStart": {
+                                  "type": "integer"
+                                },
+                                "oldLines": {
+                                  "type": "integer"
+                                },
+                                "lines": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "fileId",
+                                "path",
+                                "newStart",
+                                "newLines",
+                                "oldStart",
+                                "oldLines",
+                                "lines"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "number",
+                          "comments",
+                          "dispositions",
+                          "hunks"
+                        ]
+                      }
+                    },
+                    "setup": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "fileId": {
+                            "type": "integer"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "newStart": {
+                            "type": "integer"
+                          },
+                          "newLines": {
+                            "type": "integer"
+                          },
+                          "oldStart": {
+                            "type": "integer"
+                          },
+                          "oldLines": {
+                            "type": "integer"
+                          },
+                          "lines": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "fileId",
+                          "path",
+                          "newStart",
+                          "newLines",
+                          "oldStart",
+                          "oldLines",
+                          "lines"
+                        ]
+                      }
+                    },
+                    "planning": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "fileId": {
+                            "type": "integer"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "newStart": {
+                            "type": "integer"
+                          },
+                          "newLines": {
+                            "type": "integer"
+                          },
+                          "oldStart": {
+                            "type": "integer"
+                          },
+                          "oldLines": {
+                            "type": "integer"
+                          },
+                          "lines": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "fileId",
+                          "path",
+                          "newStart",
+                          "newLines",
+                          "oldStart",
+                          "oldLines",
+                          "lines"
+                        ]
+                      }
+                    },
+                    "unattributed": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "hunks": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "fileId": {
+                                  "type": "integer"
+                                },
+                                "path": {
+                                  "type": "string"
+                                },
+                                "newStart": {
+                                  "type": "integer"
+                                },
+                                "newLines": {
+                                  "type": "integer"
+                                },
+                                "oldStart": {
+                                  "type": "integer"
+                                },
+                                "oldLines": {
+                                  "type": "integer"
+                                },
+                                "lines": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "fileId",
+                                "path",
+                                "newStart",
+                                "newLines",
+                                "oldStart",
+                                "oldLines",
+                                "lines"
+                              ]
+                            }
+                          }
+                        },
+                        "required": ["path", "hunks"]
+                      }
+                    }
+                  },
+                  "required": [
+                    "revisionId",
+                    "unattributedCount",
+                    "spec",
+                    "tickets",
+                    "otherRepoTickets",
+                    "wrapUp",
+                    "changeRequests",
+                    "setup",
+                    "planning",
+                    "unattributed"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Review revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pull-requests/{id}/review-revision": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "required": true,
+            "name": "head",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Review revision for this pull request head; pending if it is still being computed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": ["pending"]
+                        },
+                        "id": {
+                          "type": ["integer", "null"]
+                        },
+                        "headSha": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        }
+                      },
+                      "required": ["state", "id", "headSha"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": ["failed"]
+                        },
+                        "id": {
+                          "type": "integer"
+                        },
+                        "headSha": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        },
+                        "error": {
+                          "type": ["string", "null"]
+                        }
+                      },
+                      "required": ["state", "id", "headSha", "error"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": ["ready"]
+                        },
+                        "id": {
+                          "type": "integer"
+                        },
+                        "headSha": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        },
+                        "baseSha": {
+                          "type": ["string", "null"]
+                        },
+                        "mergeBaseSha": {
+                          "type": ["string", "null"]
+                        },
+                        "previousHeadSha": {
+                          "type": ["string", "null"]
+                        },
+                        "updateBranchSincePrevious": {
+                          "type": "boolean"
+                        },
+                        "complete": {
+                          "type": "boolean"
+                        },
+                        "omittedReason": {
+                          "type": ["string", "null"]
+                        },
+                        "filesCount": {
+                          "type": "integer"
+                        },
+                        "additions": {
+                          "type": "integer"
+                        },
+                        "deletions": {
+                          "type": "integer"
+                        },
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "oldPath": {
+                                "type": ["string", "null"]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "added",
+                                  "modified",
+                                  "deleted",
+                                  "renamed",
+                                  "copied",
+                                  "mode"
+                                ]
+                              },
+                              "oldBlob": {
+                                "type": "string"
+                              },
+                              "newBlob": {
+                                "type": "string"
+                              },
+                              "additions": {
+                                "type": "integer"
+                              },
+                              "deletions": {
+                                "type": "integer"
+                              },
+                              "binary": {
+                                "type": "boolean"
+                              },
+                              "generated": {
+                                "type": "boolean"
+                              },
+                              "test": {
+                                "type": "boolean"
+                              },
+                              "lockfile": {
+                                "type": "boolean"
+                              },
+                              "patchOmitted": {
+                                "type": ["string", "null"],
+                                "enum": [
+                                  "too-large",
+                                  "binary",
+                                  "over-total",
+                                  null
+                                ]
+                              },
+                              "attributions": {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "ticket": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["ticket"]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "run": {
+                                          "type": "string"
+                                        },
+                                        "stage": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["run"]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "setup",
+                                            "planning",
+                                            "unknown"
+                                          ]
+                                        }
+                                      },
+                                      "required": ["kind"]
+                                    }
+                                  ]
+                                }
+                              },
+                              "hunks": {
+                                "type": ["array", "null"],
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "newStart": {
+                                      "type": "integer"
+                                    },
+                                    "newLines": {
+                                      "type": "integer"
+                                    },
+                                    "oldStart": {
+                                      "type": "integer"
+                                    },
+                                    "oldLines": {
+                                      "type": "integer"
+                                    },
+                                    "owners": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "newStart",
+                                    "newLines",
+                                    "oldStart",
+                                    "oldLines",
+                                    "owners"
+                                  ]
+                                }
+                              },
+                              "viewed": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "path",
+                              "oldPath",
+                              "status",
+                              "oldBlob",
+                              "newBlob",
+                              "additions",
+                              "deletions",
+                              "binary",
+                              "generated",
+                              "test",
+                              "lockfile",
+                              "patchOmitted",
+                              "attributions",
+                              "hunks",
+                              "viewed"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "id",
+                        "headSha",
+                        "baseSha",
+                        "mergeBaseSha",
+                        "previousHeadSha",
+                        "updateBranchSincePrevious",
+                        "complete",
+                        "omittedReason",
+                        "filesCount",
+                        "additions",
+                        "deletions",
+                        "files"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pull request or Review revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/review-files/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["all", "since"],
+              "default": "all"
+            },
+            "required": false,
+            "name": "view",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's patch, or the patch since it was last reviewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "view": {
+                      "type": "string",
+                      "enum": ["all", "since"]
+                    },
+                    "patch": {
+                      "type": ["string", "null"]
+                    },
+                    "patchOmitted": {
+                      "type": ["string", "null"],
+                      "enum": ["too-large", "binary", "over-total", null]
+                    }
+                  },
+                  "required": ["id", "path", "view", "patch", "patchOmitted"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such review file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/review-blobs/{sha}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "required": true,
+            "name": "sha",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A line slice of a blob that belongs to a Review revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sha": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{40}$"
+                    },
+                    "from": {
+                      "type": "integer"
+                    },
+                    "to": {
+                      "type": "integer"
+                    },
+                    "stored": {
+                      "type": "boolean"
+                    },
+                    "lines": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["sha", "from", "to", "stored", "lines"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The line range is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Review blob",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pull-requests/{id}/viewed-files/{path}": {
+      "put": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "required": true,
+            "name": "path",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "newBlob": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                },
+                "required": ["newBlob"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The file is marked viewed at this blob",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "viewed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["viewed"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "required": true,
+            "name": "path",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "newBlob": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                },
+                "required": ["newBlob"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The viewed mark is removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "viewed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["viewed"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pull-requests/{id}/review-comments": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Review comments on this pull request, including drafts pinned to the revision they were written on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "pullRequestId": {
+                            "type": "integer"
+                          },
+                          "revisionId": {
+                            "type": "integer"
+                          },
+                          "path": {
+                            "type": ["string", "null"]
+                          },
+                          "side": {
+                            "type": ["string", "null"],
+                            "enum": ["old", "new", null]
+                          },
+                          "lineStart": {
+                            "type": ["integer", "null"]
+                          },
+                          "lineEnd": {
+                            "type": ["integer", "null"]
+                          },
+                          "excerpt": {
+                            "type": ["string", "null"]
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "submitted",
+                              "addressed",
+                              "declined"
+                            ]
+                          },
+                          "changeRequestId": {
+                            "type": ["integer", "null"]
+                          },
+                          "reply": {
+                            "type": ["string", "null"]
+                          },
+                          "reworkRunId": {
+                            "type": ["integer", "null"]
+                          },
+                          "writtenOn": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "specId",
+                          "pullRequestId",
+                          "revisionId",
+                          "path",
+                          "side",
+                          "lineStart",
+                          "lineEnd",
+                          "excerpt",
+                          "body",
+                          "state",
+                          "changeRequestId",
+                          "reply",
+                          "reworkRunId",
+                          "writtenOn",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["comments"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revisionId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "path": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "side": {
+                    "type": ["string", "null"],
+                    "enum": ["old", "new", null]
+                  },
+                  "lineStart": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "lineEnd": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "excerpt": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  }
+                },
+                "required": ["revisionId", "body"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The draft Review comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "displayId": {
+                      "type": "string"
+                    },
+                    "specId": {
+                      "type": "integer"
+                    },
+                    "pullRequestId": {
+                      "type": "integer"
+                    },
+                    "revisionId": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "type": ["string", "null"]
+                    },
+                    "side": {
+                      "type": ["string", "null"],
+                      "enum": ["old", "new", null]
+                    },
+                    "lineStart": {
+                      "type": ["integer", "null"]
+                    },
+                    "lineEnd": {
+                      "type": ["integer", "null"]
+                    },
+                    "excerpt": {
+                      "type": ["string", "null"]
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["draft", "submitted", "addressed", "declined"]
+                    },
+                    "changeRequestId": {
+                      "type": ["integer", "null"]
+                    },
+                    "reply": {
+                      "type": ["string", "null"]
+                    },
+                    "reworkRunId": {
+                      "type": ["integer", "null"]
+                    },
+                    "writtenOn": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "displayId",
+                    "specId",
+                    "pullRequestId",
+                    "revisionId",
+                    "path",
+                    "side",
+                    "lineStart",
+                    "lineEnd",
+                    "excerpt",
+                    "body",
+                    "state",
+                    "changeRequestId",
+                    "reply",
+                    "reworkRunId",
+                    "writtenOn",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is empty or longer than 4000 characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pull request or Review revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not awaiting review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/review-comments/{id}": {
+      "patch": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  }
+                },
+                "required": ["body"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "displayId": {
+                      "type": "string"
+                    },
+                    "specId": {
+                      "type": "integer"
+                    },
+                    "pullRequestId": {
+                      "type": "integer"
+                    },
+                    "revisionId": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "type": ["string", "null"]
+                    },
+                    "side": {
+                      "type": ["string", "null"],
+                      "enum": ["old", "new", null]
+                    },
+                    "lineStart": {
+                      "type": ["integer", "null"]
+                    },
+                    "lineEnd": {
+                      "type": ["integer", "null"]
+                    },
+                    "excerpt": {
+                      "type": ["string", "null"]
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["draft", "submitted", "addressed", "declined"]
+                    },
+                    "changeRequestId": {
+                      "type": ["integer", "null"]
+                    },
+                    "reply": {
+                      "type": ["string", "null"]
+                    },
+                    "reworkRunId": {
+                      "type": ["integer", "null"]
+                    },
+                    "writtenOn": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "displayId",
+                    "specId",
+                    "pullRequestId",
+                    "revisionId",
+                    "path",
+                    "side",
+                    "lineStart",
+                    "lineEnd",
+                    "excerpt",
+                    "body",
+                    "state",
+                    "changeRequestId",
+                    "reply",
+                    "reworkRunId",
+                    "writtenOn",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is empty or longer than 4000 characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Review comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not awaiting review, or the comment is not a draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The draft was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["id"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Review comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not awaiting review, or the comment is not a draft",
             "content": {
               "application/json": {
                 "schema": {

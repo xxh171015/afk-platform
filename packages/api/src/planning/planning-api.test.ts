@@ -1522,6 +1522,26 @@ describe("appending tickets to a confirmed spec", () => {
     ).toEqual([{ type: "pr-draft", payload: { pullId: 1 } }]);
   });
 
+  it("deletes the final e2e row when appending to an awaiting-review spec", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE tickets SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    await db.pool.query(
+      "INSERT INTO final_e2e (spec_id, state) VALUES ($1, 'done')",
+      [specId],
+    );
+    expect((await append(specId, { tickets: [ticket("extra")] })).status).toBe(
+      200,
+    );
+    expect(
+      (
+        await db.pool.query("SELECT 1 FROM final_e2e WHERE spec_id = $1", [
+          specId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+
   it("refuses to append to a partially-merged spec and names the states that can be appended to", async () => {
     const { specId } = await confirmed();
     await db.pool.query("UPDATE specs SET state = 'partially-merged'");
@@ -2086,6 +2106,28 @@ describe("spec reference repos", () => {
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatch(/payments/);
     expect(refused.body.error).toMatch(/alice/);
+  });
+
+  it("refuses confirm when the GitHub App lacks issues write", async () => {
+    const { specId, paymentsId } = await confirmableSpecWithRef();
+    await db.pool.query(
+      `UPDATE repos SET access = $1::jsonb WHERE name = 'backend'`,
+      [
+        JSON.stringify({
+          last: {
+            state: "missing-permissions",
+            missing: ["issues: write"],
+            fixUrl: "https://github.com/settings/installations/7",
+          },
+        }),
+      ],
+    );
+    const refused = await post(`/specs/${specId}/confirm`, {
+      refPins: [{ repoId: paymentsId, sha: PIN }],
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/issues: write/);
+    expect(refused.body.error).toMatch(/installations\/7/);
   });
 
   it("pins reference repo SHAs on confirm", async () => {

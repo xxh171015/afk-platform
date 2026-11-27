@@ -11,7 +11,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 export type Shortcut =
-  | { type: "go"; to: "/" | "/waiting" | "/specs" | "/metrics" }
+  | { type: "go"; to: "/" | "/waiting" | "/review" | "/specs" | "/metrics" }
   | { type: "search" }
   | { type: "help" };
 
@@ -31,6 +31,8 @@ export function shortcutFromKey(
       return { shortcut: { type: "go", to: "/" }, pendingGo: false };
     if (event.key === "b")
       return { shortcut: { type: "go", to: "/waiting" }, pendingGo: false };
+    if (event.key === "r")
+      return { shortcut: { type: "go", to: "/review" }, pendingGo: false };
     if (event.key === "s")
       return { shortcut: { type: "go", to: "/specs" }, pendingGo: false };
     if (event.key === "m")
@@ -39,4 +41,27 @@ export function shortcutFromKey(
   }
   if (event.key === "g") return { pendingGo: true };
   return { pendingGo: false };
+}
+
+export type ReviewShortcut =
+  | { type: "next-file" }
+  | { type: "prev-file" }
+  | { type: "next-hunk" }
+  | { type: "prev-hunk" }
+  | { type: "toggle-viewed" }
+  | { type: "focus-filter" }
+  | { type: "comment" };
+
+export function reviewShortcutFromKey(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey">,
+): ReviewShortcut | undefined {
+  if (event.metaKey || event.ctrlKey) return undefined;
+  if (event.key === "j") return { type: "next-file" };
+  if (event.key === "k") return { type: "prev-file" };
+  if (event.key === "n") return { type: "next-hunk" };
+  if (event.key === "p") return { type: "prev-hunk" };
+  if (event.key === "v") return { type: "toggle-viewed" };
+  if (event.key === "/") return { type: "focus-filter" };
+  if (event.key === "c") return { type: "comment" };
+  return undefined;
 }

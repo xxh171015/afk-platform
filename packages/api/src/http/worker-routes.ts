@@ -2,6 +2,7 @@ import {
   DECISION_KINDS,
   HOST_KINDS,
   REVIEW_AXES,
+  ReviewRevisionResultSchema,
   RULING_VERDICTS,
   StageModelsSchema,
   TICKET_REVIEW_MODES,
@@ -32,6 +33,8 @@ import {
   readPatchPrBodyPayload,
   readPrDraftPayload,
   readPrReadyPayload,
+  readReviewNotePayload,
+  readReviewRevisionPayload,
   readSpecCleanupPayload,
 } from "../host/host-jobs.ts";
 import {
@@ -51,6 +54,7 @@ import {
   repoAccessFailed,
   repoAccessTask,
 } from "../host/repo-access.ts";
+import { recordReviewRevision } from "../host/review-revision.ts";
 import {
   buildTrialMergeTask,
   readTrialMergePayload,
@@ -422,6 +426,24 @@ const Bundle = z.object({
       }),
     )
     .nullable(),
+  // rework: this repo's submitted Review comments for the active Change request
+  reviewComments: z
+    .object({
+      changeRequest: z.number().int(),
+      currentHead: z.string(),
+      comments: z.array(
+        z.object({
+          id: z.string(),
+          writtenOn: z.string(),
+          path: z.string().nullable(),
+          side: z.enum(["old", "new"]).nullable().optional(),
+          lines: z.array(z.number().int()).optional(),
+          excerpt: z.string().optional(),
+          body: z.string(),
+        }),
+      ),
+    })
+    .nullable(),
   handbackResolve: z.boolean().optional(),
 });
 
@@ -538,6 +560,22 @@ const HostTask = z.discriminatedUnion("kind", [
     expectedHeadSha: z.string(),
     section: z.string(),
   }),
+  z.object({
+    kind: z.literal("review-revision"),
+    pullId: z.number().int(),
+    repoUrl: z.string(),
+    repoName: z.string(),
+    defaultBranch: z.string(),
+    headSha: z.string(),
+    previousHeadSha: z.string().nullable(),
+  }),
+  z.object({
+    kind: z.literal("review-note"),
+    repoUrl: z.string(),
+    number: z.number().int(),
+    marker: z.string(),
+    body: z.string(),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -553,7 +591,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge, review-revision or review-note job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -972,6 +1010,29 @@ export function registerWorkerRoutes(
     // The job finishing and the ticket moving on happen together or not at all.
     const outcome = await aroundJob(context, id, () =>
       inWorkerReport(context, id, async (client) => {
+        const current = await client.query<{
+          type: string;
+          payload: Record<string, unknown>;
+        }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
+        const review = current.rows[0]
+          ? readReviewRevisionPayload(current.rows[0])
+          : undefined;
+        if (review) {
+          const chunk = ReviewRevisionResultSchema.safeParse(result);
+          if (chunk.success && chunk.data.done === false) {
+            await recordReviewRevision(client, review, result, context.clock());
+            const leaseExpiresAt = new Date(
+              context.clock().getTime() + context.leaseSeconds * 1000,
+            );
+            await client.query(
+              `UPDATE jobs SET lease_expires_at = $5
+               WHERE id = $1 AND state = 'running' AND lease_owner = $2
+                 AND attempt = $3 AND lease_expires_at > $4`,
+              [id, workerId, attempt, context.clock(), leaseExpiresAt],
+            );
+            return { status: "ok" as const };
+          }
+        }
         const finished = await completeJob(
           client,
           { jobId: id, workerId, attempt, now: context.clock() },
@@ -1027,6 +1088,7 @@ export function registerWorkerRoutes(
                 const access = readRepoAccessPayload(job.rows[0]);
                 const indexLinks = readIndexPrLinksPayload(job.rows[0]);
                 const autoMerge = readAutoMergePayload(job.rows[0]);
+                const reviewRevision = readReviewRevisionPayload(job.rows[0]);
                 if (access)
                   await recordRepoAccess(
                     client,
@@ -1046,6 +1108,13 @@ export function registerWorkerRoutes(
                   await recordIndexPrLinks(client, indexLinks, result);
                 else if (autoMerge)
                   await recordAutoMerge(client, autoMerge, result);
+                else if (reviewRevision)
+                  await recordReviewRevision(
+                    client,
+                    reviewRevision,
+                    result,
+                    context.clock(),
+                  );
               }
             }
           }
@@ -1116,7 +1185,9 @@ export function registerWorkerRoutes(
         readSpecCleanupPayload(row) ??
         readPatchPrBodyPayload(row) ??
         readIndexPrLinksPayload(row) ??
-        readAutoMergePayload(row));
+        readAutoMergePayload(row) ??
+        readReviewRevisionPayload(row) ??
+        readReviewNotePayload(row));
     const task =
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)

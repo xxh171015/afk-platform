@@ -270,6 +270,17 @@ async function completeIfPatch(job: {
   id: number;
   attempt: number;
 }) {
+  if (job.type === "review-revision") {
+    await worker.complete(job.id, job.attempt, {});
+    return true;
+  }
+  if (job.type === "review-note") {
+    await worker.complete(job.id, job.attempt, {
+      stage: "review-note",
+      outcome: "upserted",
+    });
+    return true;
+  }
   if (job.type !== "patch-pr-body") return false;
   await worker.complete(job.id, job.attempt, PATCHED);
   return true;
@@ -1326,7 +1337,9 @@ describe("following the pull requests", () => {
     const first = await claimOf("host-sync");
     await worker.complete(first.id, first.attempt, {
       stage: "host-sync",
-      pulls: [synced(1, { ci: "success", review: "approved" })],
+      pulls: [
+        synced(1, { ci: "success", review: "approved", headSha: "sha1" }),
+      ],
     });
     expect(await hostEvents()).toEqual([
       expect.objectContaining({
@@ -1345,7 +1358,58 @@ describe("following the pull requests", () => {
     const second = await claimOf("host-sync");
     await worker.complete(second.id, second.attempt, {
       stage: "host-sync",
-      pulls: [synced(1, { ci: "success", review: "approved" })],
+      pulls: [
+        synced(1, { ci: "success", review: "approved", headSha: "sha1" }),
+      ],
+    });
+    expect(await eventCount()).toBe(before);
+  });
+
+  it("records a change of head SHA, default-branch conflict, and human comments, and nothing for synced_at alone", async () => {
+    await awaitingReview();
+    const first = await claimOf("host-sync");
+    const nextHead = "e".repeat(40);
+    await worker.complete(first.id, first.attempt, {
+      stage: "host-sync",
+      pulls: [
+        synced(1, {
+          ci: "none",
+          headSha: nextHead,
+          conflictsWithDefault: true,
+          humanComments: 2,
+        }),
+      ],
+    });
+    expect(await hostEvents()).toEqual([
+      expect.objectContaining({
+        type: "pull-request-head",
+        from_state: "sha1",
+        to_state: nextHead,
+      }),
+      expect.objectContaining({
+        type: "pull-request-conflicts",
+        from_state: "false",
+        to_state: "true",
+      }),
+      expect.objectContaining({
+        type: "pull-request-human-comments",
+        from_state: null,
+        to_state: "2",
+      }),
+    ]);
+    const before = await eventCount();
+    clock.advanceSeconds(60);
+    const second = await claimOf("host-sync");
+    await worker.complete(second.id, second.attempt, {
+      stage: "host-sync",
+      pulls: [
+        synced(1, {
+          ci: "none",
+          headSha: nextHead,
+          conflictsWithDefault: true,
+          humanComments: 2,
+        }),
+      ],
     });
     expect(await eventCount()).toBe(before);
   });
@@ -2974,6 +3038,28 @@ describe("cleaning up after a cancelled or merged spec", () => {
     });
   });
 
+  it("deletes every Rework branch of the spec's Change requests", async () => {
+    await awaitingReview(["backend"]);
+    const id = await instanceId();
+    await db.pool.query(
+      `INSERT INTO change_requests (spec_id, number, state)
+       VALUES (1, 1, 'done'), (1, 2, 'active')`,
+    );
+    await call("POST", "/specs/1/cancel");
+    const branches = (await taskOf(await claimCleanup())).body.branches as {
+      repoUrl: string;
+      branch: string;
+    }[];
+    expect(branches).toContainEqual({
+      repoUrl: BACKEND,
+      branch: `agent/${id}/S-1-rework-1`,
+    });
+    expect(branches).toContainEqual({
+      repoUrl: BACKEND,
+      branch: `agent/${id}/S-1-rework-2`,
+    });
+  });
+
   it("deletes the flat names of a spec that was made before the databases had ids, and nothing that carries an id", async () => {
     await awaitingReview(["backend"]);
     await db.pool.query("UPDATE specs SET branch_namespace = NULL");
@@ -3332,11 +3418,10 @@ describe("host-sync snapshots and invalidate", () => {
       await look([asOpened(1, { ci: "failure", review: "approved" })]);
       expect(await stream.nextInvalidate()).toMatchObject({ specId });
 
-      // head_sha is not an event (drizzle/0035_events.sql), so a look that only moves head does not invalidate.
       await look([
         asOpened(1, { ci: "failure", review: "approved", headSha: "head-2" }),
       ]);
-      await expect(stream.nextInvalidate(200)).rejects.toThrow(/no invalidate/);
+      expect(await stream.nextInvalidate()).toMatchObject({ specId });
 
       notices.length = 0;
       await look([

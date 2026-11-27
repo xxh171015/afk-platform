@@ -77,6 +77,11 @@ async function forecastFor(
     `SELECT 1 FROM jobs WHERE type = 'auto-merge' AND (payload->>'specId')::int = $1 LIMIT 1`,
     [spec.id],
   );
+  const comments = await db.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM review_comments
+     WHERE spec_id = $1 AND state <> 'draft'`,
+    [spec.id],
+  );
   const forecast = autoMergeForecast({
     mergePolicy,
     specType: spec.type,
@@ -86,6 +91,7 @@ async function forecastFor(
     awaitingReviewAt: opened.rows[0]?.at ?? null,
     hadAutoMergeJob: (existing.rowCount ?? 0) > 0,
     now,
+    reviewComments: Number(comments.rows[0]?.n ?? 0),
   });
   return { forecast, pulls: pulls.rows };
 }

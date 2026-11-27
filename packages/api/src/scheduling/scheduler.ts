@@ -251,6 +251,8 @@ export async function confirmSpec(
           fix?: string;
           username?: string;
           message?: string;
+          missing?: string[];
+          fixUrl?: string;
         };
       } | null;
     }>(

@@ -40,6 +40,13 @@ const READ: TokenPermissions = {
   statuses: "read",
 };
 const BRANCH: TokenPermissions = { contents: "read" };
+// GitHub Apps cannot POST /issues/{n}/comments on a pull request with only issues:write
+// (403 Resource not accessible by integration). pull_requests:write is required too.
+// Seen on afk-platform PR 379 during #377.
+const ISSUES_WRITE: TokenPermissions = {
+  issues: "write",
+  pull_requests: "write",
+};
 
 interface RawPull {
   number: number;
@@ -144,6 +151,7 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
   }
 
   interface RawComment {
+    id?: number;
     user?: { login?: string; type?: string } | null;
     body?: string | null;
   }
@@ -162,8 +170,11 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
     return verdicts.includes("APPROVED") ? "approved" : "none";
   }
 
-  async function tokenLogin(repo: RepoRef): Promise<string | null> {
-    const token = await options.tokens.tokenFor({ repo, permissions: READ });
+  async function tokenLogin(
+    repo: RepoRef,
+    permissions: TokenPermissions = READ,
+  ): Promise<string | null> {
+    const token = await options.tokens.tokenFor({ repo, permissions });
     if (loginByToken.has(token)) return loginByToken.get(token) ?? null;
     const response = await doFetch(`${apiUrl}/user`, {
       method: "GET",
@@ -285,6 +296,79 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
     };
   }
 
+  async function listIssueComments(
+    repo: RepoRef,
+    number: number,
+  ): Promise<RawComment[]> {
+    const all: RawComment[] = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const read = await call(
+        repo,
+        ISSUES_WRITE,
+        "GET",
+        `/issues/${number}/comments?per_page=${PAGE_SIZE}&page=${page}`,
+      );
+      if (read.status !== 200)
+        throw new HostError(
+          `GitHub answered ${read.status} listing comments on pull request ${number}`,
+          read.status,
+        );
+      const batch = Array.isArray(read.body) ? (read.body as RawComment[]) : [];
+      all.push(...batch);
+      if (batch.length < PAGE_SIZE) return all;
+    }
+    throw new HostError(
+      `GitHub has more than ${MAX_PAGES * PAGE_SIZE} comments on ${repo.owner}/${repo.name} pull request ${number}; not judging by the first of them`,
+      200,
+    );
+  }
+
+  const upsertPlatformComment: HostAdapter["upsertPlatformComment"] = async ({
+    repo,
+    number,
+    marker,
+    body,
+  }) => {
+    const comments = await listIssueComments(repo, number);
+    const me = await tokenLogin(repo, ISSUES_WRITE);
+    const existing = comments.find(
+      (row) =>
+        typeof row.id === "number" &&
+        typeof row.body === "string" &&
+        row.body.includes(marker) &&
+        (me === null || row.user?.login === me),
+    );
+    if (existing && typeof existing.id === "number") {
+      const patched = await call(
+        repo,
+        ISSUES_WRITE,
+        "PATCH",
+        `/issues/comments/${existing.id}`,
+        { body },
+      );
+      if (patched.status !== 200)
+        throw new HostError(
+          `GitHub answered ${patched.status} updating the review-notes comment on pull request ${number}`,
+          patched.status,
+        );
+      return { id: String(existing.id) };
+    }
+    const created = await call(
+      repo,
+      ISSUES_WRITE,
+      "POST",
+      `/issues/${number}/comments`,
+      { body },
+    );
+    const id = (created.body as { id?: unknown } | null)?.id;
+    if (created.status !== 201 || typeof id !== "number")
+      throw new HostError(
+        `GitHub answered ${created.status} creating the review-notes comment on pull request ${number}`,
+        created.status,
+      );
+    return { id: String(id) };
+  };
+
   const getPullRequest: HostAdapter["getPullRequest"] = async ({
     repo,
     number,
@@ -298,6 +382,7 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
 
   return {
     getPullRequest,
+    upsertPlatformComment,
     async getBranchSha({ repo, branch }) {
       const path = `/git/ref/heads/${branch.split("/").map(encodeURIComponent).join("/")}`;
       const read = await call(repo, BRANCH, "GET", path);
