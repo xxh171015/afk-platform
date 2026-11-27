@@ -1396,10 +1396,10 @@ describe("failures of the worker's own", { timeout: 60_000 }, () => {
 
 describe("a gate whose setup fails", { timeout: 60_000 }, () => {
   it("is tried again as a job and never sent to gate-fix: the ticket waits for a person after three", async () => {
-    // the setup fails while the registry cannot be reached, which the agent's work stands in for here
+    // a broken lockfile is a platform setup failure (not a registry blip): three tries, then a person
     seed.commit(
       {
-        ".sandcastle/gates.yaml": `setup: "sh -c 'test ! -f NO_REGISTRY || { echo tls handshake eof; exit 1; }'"\n${GATES}`,
+        ".sandcastle/gates.yaml": `setup: "sh -c 'test ! -f BROKEN_LOCKFILE || { echo ERR_PNPM_LOCKFILE; exit 1; }'"\n${GATES}`,
       },
       "a setup step",
     );
@@ -1410,7 +1410,7 @@ describe("a gate whose setup fails", { timeout: 60_000 }, () => {
       executor: deps({
         script: (ctx) =>
           ctx.stage === "implement"
-            ? { files: { NO_REGISTRY: "x\n" }, output: DONE }
+            ? { files: { BROKEN_LOCKFILE: "x\n" }, output: DONE }
             : undefined,
       }),
       stopWhenIdle: true,
@@ -1434,7 +1434,7 @@ describe("a gate whose setup fails", { timeout: 60_000 }, () => {
     ]);
     expect(stages.some((s) => s.startsWith("gate-fix"))).toBe(false);
     expect(runs.rows.find((r) => r.stage === "gate")?.error).toContain(
-      "gate setup failed (exit 1)\ntls handshake eof",
+      "gate setup failed (exit 1)\nERR_PNPM_LOCKFILE",
     );
     const stored = await db.pool.query(
       "SELECT count(*)::int AS n FROM gate_results",
