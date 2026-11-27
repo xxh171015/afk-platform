@@ -147,7 +147,20 @@ describe("the events of a ticket", () => {
 
   it("puts a block on an outside service when the job's error names one", async () => {
     await runningSpec(["a"]);
-    await failThreeTimes("GitHub answered 502 reading pull request 3");
+    for (let i = 0; i < 5; i++) {
+      const job = await claim();
+      if (!job) throw new Error("no job for T-1");
+      expect(
+        (
+          await worker.fail(
+            job.id,
+            job.attempt,
+            "GitHub answered 502 reading pull request 3",
+          )
+        ).status,
+      ).toBe(200);
+      clock.advanceSeconds(600);
+    }
     const blocked = (await eventsOf("ticket", 1)).at(-1);
     expect(blocked).toMatchObject({
       to_state: "blocked",
@@ -280,6 +293,14 @@ describe("the failure source the database works out", () => {
     "gate setup failed (exit 124)\nProgress: resolved 812",
     "gate setup failed (exit 1)\nERR_PNPM_LOCKFILE",
     "Failed to reach the Cursor API",
+    "Premature close",
+    "socket disconnected",
+    "Could not establish a secure TLS connection",
+    "resume attempts made no progress",
+    "fatal: unable to access 'https://github.com/x.git/': The requested URL returned error: 502",
+    "SSL certificate problem: unable to get local issuer certificate",
+    "Failed to connect to github.com port 443: Connection timed out",
+    "Failed to connect to gitlab.com port 443: Connection refused",
   ];
 
   it("treats Failed to reach the Cursor API as an outside service", async () => {

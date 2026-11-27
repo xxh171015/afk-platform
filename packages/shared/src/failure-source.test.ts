@@ -95,6 +95,15 @@ describe("failure source of a failed job", () => {
     "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
     "gate setup failed (exit 124)\nProgress: resolved 812, reused 790, downloaded 3",
     "Failed to reach the Cursor API",
+    "Premature close",
+    "socket disconnected before the response completed",
+    "Could not establish a secure TLS connection",
+    "resume attempts made no progress",
+    "fatal: unable to access 'https://github.com/x.git/': The requested URL returned error: 502",
+    "fatal: unable to access 'http://git.internal/x.git/': Failed to connect",
+    "SSL certificate problem: unable to get local issuer certificate",
+    "Failed to connect to github.com port 443: Connection timed out",
+    "Failed to connect to gitlab.com port 443: Connection refused",
   ];
   const platform = [
     "could not push agent/T-4: ! [rejected] agent/T-4 -> agent/T-4 (non-fast-forward)",
