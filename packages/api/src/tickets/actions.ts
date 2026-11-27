@@ -54,6 +54,7 @@ interface TicketRow {
   allowed_recheck_shas: string[];
   type: string;
   resume_stage: "e2e" | "gate" | null;
+  retry_note: string | null;
 }
 
 function testNamesFrom(raw: unknown): { classname: string; name: string }[] {
@@ -81,7 +82,7 @@ async function loadLocked(
   await lockSpec(client, found.rows[0].spec_id);
   const row = await client.query<TicketRow>(
     `SELECT id, spec_id, repo_id, state, blocked_reason, content_version, allowed_protected_paths,
-            allowed_removed_tests, allowed_recheck_shas, type, resume_stage
+            allowed_removed_tests, allowed_recheck_shas, type, resume_stage, retry_note
      FROM tickets WHERE id = $1`,
     [ticketId],
   );
@@ -104,6 +105,17 @@ export function parkedRetryNote(
   if (typeof note !== "string") return null;
   const trimmed = note.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+// Platform text first, a person's Retry note after. Either side may be missing.
+export function combinedRetryNote(
+  platform: string | null | undefined,
+  human: string | null | undefined,
+): string | null {
+  const left = parkedRetryNote(platform);
+  const right = parkedRetryNote(human);
+  if (left && right) return `${left}\n\n${right}`;
+  return left ?? right;
 }
 
 const AGENT_PUSH_STAGES = [
@@ -163,11 +175,20 @@ export async function retryTicket(
     }
     const plan = retryPlan(mode === "continue" ? "resume" : "restart");
     const parked = parkedRetryNote(note);
+    // After job-failed, keep the platform's note and put a person's Retry note after it. Restart drops the
+    // platform note (align drops the branch; salvage.diff is omitted too).
+    const keepPlatform =
+      mode === "continue" &&
+      (ticket.blocked_reason === "job-failed" ||
+        ticket.blocked_reason === "integration-environment-failed");
+    const stored = keepPlatform
+      ? combinedRetryNote(ticket.retry_note, parked)
+      : parked;
     // Continuing without a note for the agent, on a branch an agent already finished: nothing needs writing, so the
     // pipeline goes on from the gate (which reuses a stored pass) instead of an implement run finding nothing to do.
     const fromGate =
       mode === "continue" &&
-      parked === null &&
+      stored === null &&
       (await finishedBranch(client, ticketId));
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, auto_retried = false,
@@ -181,7 +202,7 @@ export async function retryTicket(
         ticketId,
         JSON.stringify(plan.fixCounts),
         plan.deleteBranch,
-        parked,
+        stored,
         fromGate,
       ],
     );

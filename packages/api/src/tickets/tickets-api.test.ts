@@ -789,6 +789,66 @@ describe("retry note", () => {
     const second = await nextBundle();
     expect(second.bundle.note).toBeNull();
   });
+
+  const salvage = {
+    commits: [
+      {
+        sha: "abc1111111111111111111111111111111111111",
+        subject: "export orders as csv",
+      },
+    ],
+    hadDiff: true,
+    diffTooLarge: false,
+  };
+
+  async function blockedByJobFailed() {
+    await runningSpec([ticket("a")]);
+    for (let i = 0; i < 3; i++) {
+      const job = (await worker.claim()).body.job as Claimed;
+      expect(job.payload.stage).toBe("implement");
+      expect(
+        (
+          await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+            salvage,
+          })
+        ).status,
+      ).toBe(200);
+    }
+    expect(await row(1)).toMatchObject({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+  }
+
+  it("puts the platform Retry note before a person's note after a job-failed retry", async () => {
+    await blockedByJobFailed();
+    const human = "use the helper in src/orders/csv.ts";
+    await call("POST", "/tickets/1/retry", { mode: "continue", note: human });
+    const { bundle } = await nextBundle();
+    expect(bundle.note).toContain("平台自动重试");
+    expect(bundle.note).toContain("export orders as csv");
+    expect(bundle.note).toContain(human);
+    expect(bundle.note.indexOf("平台自动重试")).toBeLessThan(
+      bundle.note.indexOf(human),
+    );
+  });
+
+  it("keeps the platform Retry note when they retry a job-failed ticket without one of their own", async () => {
+    await blockedByJobFailed();
+    await call("POST", "/tickets/1/retry", { mode: "continue" });
+    const { bundle } = await nextBundle();
+    expect(bundle.note).toContain("平台自动重试");
+    expect(bundle.note).toContain("export orders as csv");
+  });
+
+  it("gives neither the platform Retry note nor salvage.diff on a restart", async () => {
+    await blockedByJobFailed();
+    await call("POST", "/tickets/1/retry", { mode: "restart" });
+    const { bundle } = await nextBundle();
+    expect(bundle.ticket.restart).toBe(true);
+    expect(bundle.note).toBeNull();
+    expect(bundle.salvageDiff).toBeUndefined();
+  });
 });
 
 describe("editing a ticket", () => {

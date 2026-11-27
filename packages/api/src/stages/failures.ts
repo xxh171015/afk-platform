@@ -63,7 +63,11 @@ import {
 } from "../planning/planning-commit.ts";
 import { lockSpec, schedulePass } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
-import { type AutoRetryTarget, jobFailureRetryNote } from "./auto-retry.ts";
+import {
+  type AutoRetryTarget,
+  jobFailureRetryNote,
+  LEASE_EXPIRED_RETRY_NOTE,
+} from "./auto-retry.ts";
 import {
   EXPECTED_STATE,
   recordOrphanEvent,
@@ -370,6 +374,10 @@ export async function recordJobFailure(
   return { status: "not-a-stage" };
 }
 
+function isLeaseExpiredError(error: string): boolean {
+  return error === LEASE_EXPIRED_ERROR || error.startsWith("lease-expired:");
+}
+
 async function writeJobFailureRetryNote(
   client: pg.PoolClient,
   target: AutoRetryTarget,
@@ -379,19 +387,22 @@ async function writeJobFailureRetryNote(
   run?: FailedRunFacts,
 ): Promise<void> {
   if (!SALVAGE_RETRY_STAGES.has(stage)) return;
-  if (error === LEASE_EXPIRED_ERROR || error.startsWith("lease-expired:"))
-    return;
-  const duration = (
-    await client.query<{ duration_ms: number | null }>(
-      "SELECT duration_ms FROM runs WHERE job_id = $1 ORDER BY id DESC LIMIT 1",
-      [jobId],
-    )
-  ).rows[0]?.duration_ms;
-  const note = jobFailureRetryNote(
-    duration ?? 0,
-    storedJobError(error),
-    run?.salvage,
-  );
+  let note: string;
+  if (isLeaseExpiredError(error)) {
+    note = LEASE_EXPIRED_RETRY_NOTE;
+  } else {
+    const duration = (
+      await client.query<{ duration_ms: number | null }>(
+        "SELECT duration_ms FROM runs WHERE job_id = $1 ORDER BY id DESC LIMIT 1",
+        [jobId],
+      )
+    ).rows[0]?.duration_ms;
+    note = jobFailureRetryNote(
+      duration ?? 0,
+      storedJobError(error),
+      run?.salvage,
+    );
+  }
   if (target.type === "ticket")
     await client.query("UPDATE tickets SET retry_note = $2 WHERE id = $1", [
       target.ticketId,
@@ -501,6 +512,19 @@ async function ticketStageFailed(
     [read.ticketId, reason],
   );
   await cancelTicketJobs(client, read.ticketId, "the ticket was blocked");
+  await writeJobFailureRetryNote(
+    client,
+    {
+      type: "ticket",
+      specId: row.spec_id,
+      repoId: row.repo_id,
+      ticketId: read.ticketId,
+    },
+    jobId,
+    read.stage,
+    error,
+    run,
+  );
   // it no longer holds an agent run
   await schedulePass(client, row.spec_id);
   return { status: "blocked", failures };
@@ -563,6 +587,19 @@ async function finalStepFailed(
   await client.query(
     "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
     [fin.id, immediate ?? JOB_FAILED],
+  );
+  await writeJobFailureRetryNote(
+    client,
+    {
+      type: "finalization",
+      specId: read.specId,
+      repoId: read.repoId,
+      finalizationId: fin.id,
+    },
+    jobId,
+    read.step,
+    error,
+    run,
   );
   return { status: "blocked", failures };
 }
