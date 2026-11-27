@@ -149,6 +149,14 @@ export const EXTERNAL_ERROR_PATTERNS = [
   "docker build of .+ failed",
   // GNU timeout's exit: the gate's setup (installing dependencies, pulling images) ran out of time on the network
   "gate setup failed \\(exit 124\\)",
+  "premature close",
+  "socket disconnected",
+  "secure tls connection",
+  "resume attempts made no progress",
+  // `.` stands in for the quote in `unable to access 'https://…'` so the pattern is the same in JS and Postgres
+  "unable to access .https?://",
+  "ssl",
+  "connection timed out|connection refused",
 ] as const;
 
 const EXTERNAL = EXTERNAL_ERROR_PATTERNS.map(

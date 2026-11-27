@@ -71,25 +71,34 @@ import {
 
 // A worker that cannot carry out a stage reports the job as failed (its sandbox would not start, a push was
 // refused, ...). A network blip is retried; a non-fast-forward takes the ticket over at once, and a host
-// permission refusal as job-failed. Other infrastructure errors are queued again and block after three.
+// permission refusal as job-failed. Platform failures are queued again and block after three. Outside-service
+// failures (Cursor disconnects, code-host access) have their own count from job_floor and block at the fifth.
 // Cursor auth, a bad model, a spent quota, and a failed integration image build still skip the requeue.
 export const MAX_JOB_FAILURES = 3;
+export const MAX_EXTERNAL_JOB_FAILURES = 5;
 
-// External job failures wait before the next attempt so three blips do not burn the three-failure
-// budget in seconds. After the 1st: 10 s, after the 2nd: 30 s; the 3rd blocks. Same 10, 30, 90 s
-// ladder as 4.6's in-place push retries (packages/worker/src/stages/implement.ts waitSeconds
-// 10, 30, 90, 180); job requeue has no 90 s step because the third failure blocks instead of
-// running again.
-export const EXTERNAL_REQUEUE_WAIT_SECONDS = [10, 30] as const;
+// External job failures wait so a few minutes of disconnect do not need a person. After the 1st: 30 s,
+// then 2 min, 5 min, 10 min; the 5th blocks. Platform failures still requeue at once.
+export const EXTERNAL_REQUEUE_WAIT_SECONDS = [30, 120, 300, 600] as const;
 
-function notBeforeForExternalRequeue(
+function notBeforeForExternalRequeue(failures: number, now: Date): Date {
+  return inSeconds(now, EXTERNAL_REQUEUE_WAIT_SECONDS[failures - 1]);
+}
+
+function requeueAfterJobFailure(
   error: string,
-  failures: number,
+  counts: { external: number; platform: number },
   now: Date,
-): Date | undefined {
-  if (failureSourceOf("job-failed", error) !== "external") return undefined;
-  const seconds = EXTERNAL_REQUEUE_WAIT_SECONDS[failures - 1];
-  return seconds === undefined ? undefined : inSeconds(now, seconds);
+): { notBefore?: Date; failures: number } | undefined {
+  if (failureSourceOf("job-failed", error) === "external") {
+    if (counts.external >= MAX_EXTERNAL_JOB_FAILURES) return undefined;
+    return {
+      notBefore: notBeforeForExternalRequeue(counts.external, now),
+      failures: counts.external,
+    };
+  }
+  if (counts.platform >= MAX_JOB_FAILURES) return undefined;
+  return { failures: counts.platform };
 }
 
 const JOB_FAILED: BlockedReason = "job-failed";
@@ -259,6 +268,24 @@ const failuresOf = async (
     ).rows[0]?.n,
   );
 
+const failuresBySource = async (
+  client: pg.PoolClient,
+  prefix: string,
+  floor: number,
+): Promise<{ external: number; platform: number }> => {
+  const { rows } = await client.query<{ error: string | null }>(
+    "SELECT error FROM jobs WHERE idempotency_key LIKE $1 AND state = 'failed' AND id > $2",
+    [`${prefix}%`, floor],
+  );
+  let external = 0;
+  let platform = 0;
+  for (const row of rows) {
+    if (failureSourceOf("job-failed", row.error) === "external") external += 1;
+    else platform += 1;
+  }
+  return { external, platform };
+};
+
 export async function recordJobFailure(
   client: pg.PoolClient,
   job: StageJob,
@@ -359,7 +386,7 @@ async function ticketStageFailed(
   if (!row || !stateFits || read.contentVersion !== row.content_version)
     return { status: "ignored" };
 
-  const failures = await failuresOf(
+  const counts = await failuresBySource(
     client,
     ticketJobKeyPrefix({
       ticketId: read.ticketId,
@@ -369,7 +396,10 @@ async function ticketStageFailed(
     row.job_floor,
   );
   const immediate = immediateBlockReason(error);
-  if (!immediate && failures < MAX_JOB_FAILURES) {
+  const retry = immediate
+    ? undefined
+    : requeueAfterJobFailure(error, counts, now);
+  if (retry) {
     await enqueueStageJob(
       client,
       {
@@ -380,10 +410,11 @@ async function ticketStageFailed(
       },
       read.stage,
       {},
-      notBeforeForExternalRequeue(error, failures, now),
+      retry.notBefore,
     );
-    return { status: "requeued", failures };
+    return { status: "requeued", failures: retry.failures };
   }
+  const failures = counts.external + counts.platform;
   if (immediate === "branch-moved") {
     const tips = tipsFromPushFailure(error);
     const taken = await applyTakeover(client, read.ticketId, {
@@ -432,7 +463,7 @@ async function finalStepFailed(
   if (fin?.state !== "active" || fin.step !== read.step)
     return { status: "ignored" };
 
-  const failures = await failuresOf(
+  const counts = await failuresBySource(
     client,
     finalJobKeyPrefix({
       specId: read.specId,
@@ -442,16 +473,14 @@ async function finalStepFailed(
     fin.job_floor,
   );
   const immediate = immediateBlockReason(error);
-  if (!immediate && failures < MAX_JOB_FAILURES) {
-    await enqueueFinalJob(
-      client,
-      read,
-      read.step,
-      {},
-      notBeforeForExternalRequeue(error, failures, now),
-    );
-    return { status: "requeued", failures };
+  const retry = immediate
+    ? undefined
+    : requeueAfterJobFailure(error, counts, now);
+  if (retry) {
+    await enqueueFinalJob(client, read, read.step, {}, retry.notBefore);
+    return { status: "requeued", failures: retry.failures };
   }
+  const failures = counts.external + counts.platform;
   await client.query(
     "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
     [fin.id, immediate ?? JOB_FAILED],

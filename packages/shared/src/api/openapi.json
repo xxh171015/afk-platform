@@ -6661,7 +6661,12 @@
                     "tokenUsage": {},
                     "resultFix": {
                       "type": ["string", "null"],
-                      "enum": ["normalized", "repaired", null]
+                      "enum": [
+                        "normalized",
+                        "repaired",
+                        "recovered-after-exit",
+                        null
+                      ]
                     },
                     "repoUrl": {
                       "type": "string"
@@ -8584,7 +8589,8 @@
                               "resume",
                               "merged",
                               "action",
-                              "auto-retry"
+                              "auto-retry",
+                              "recovered-after-exit"
                             ]
                           },
                           "at": {

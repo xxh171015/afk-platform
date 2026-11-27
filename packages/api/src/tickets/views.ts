@@ -680,7 +680,7 @@ interface RunDetailRecord extends RunRecord {
   sources: string[] | null;
   duration_api_ms: number | null;
   token_usage: unknown;
-  result_fix: "normalized" | "repaired" | null;
+  result_fix: "normalized" | "repaired" | "recovered-after-exit" | null;
 }
 
 function runRow(r: RunRecord) {

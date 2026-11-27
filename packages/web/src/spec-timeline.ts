@@ -21,6 +21,7 @@ export const TIMELINE_KINDS = [
   "merged",
   "action",
   "auto-retry",
+  "recovered-after-exit",
 ] as const;
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number];
@@ -42,6 +43,7 @@ export const TIMELINE_LABELS: Record<TimelineKind, string> = {
   merged: "合并进 main",
   action: "人的操作",
   "auto-retry": "自动重试",
+  "recovered-after-exit": "断线收下",
 };
 
 const STANDALONE_KINDS = new Set<TimelineKind>([

@@ -16,6 +16,7 @@ import {
   hasRef,
   isAncestor,
   projectOf,
+  type ResultFix,
   type RunGateInput,
   readGateConfig,
   reclaimEnvironments,
@@ -56,9 +57,15 @@ export interface ExecutorDeps {
   // What an integration environment needs: docker, and the limit on how many a worker runs at once.
   docker?: DockerCli;
   environments?: EnvironmentLimiter;
-  makeAgentRunner(slotDir: string, runId?: string): AgentRunner;
+  makeAgentRunner(
+    slotDir: string,
+    runId?: string,
+    logDir?: string,
+  ): AgentRunner;
   makeGateSandbox(slotDir: string, runId?: string): GateSandbox;
   tmpRoot?: string;
+  // Worker home sandbox-logs; the per-run /afk-out dir is created inside it.
+  sandboxLogsRoot?: string;
   model?: string; // the worker's own model: what a project that sets none gets
   skillsSha?: string; // the skills version the worker checked at start-up; recorded on every agent Run
   secrets?: readonly string[]; // kept out of the raw event lines that are uploaded
@@ -126,7 +133,7 @@ export function agentFacts(
     tokenUsage?: unknown;
     durationApiMs?: number;
     cursorCliVersion?: string;
-    resultFix?: "normalized" | "repaired";
+    resultFix?: ResultFix;
   },
 ) {
   return {

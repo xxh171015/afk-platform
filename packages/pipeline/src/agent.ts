@@ -129,7 +129,12 @@ export function strictResultSchema<S extends z.ZodType>(schema: S): z.ZodType {
   return resultSchemaInners.get(schema) ?? schema;
 }
 
-export type ResultFix = "normalized" | "repaired";
+export const RESULT_FIXES = [
+  "normalized",
+  "repaired",
+  "recovered-after-exit",
+] as const;
+export type ResultFix = (typeof RESULT_FIXES)[number];
 
 export function interpretStructuredOutput<S extends z.ZodType>(
   schema: S,
@@ -500,6 +505,8 @@ export interface AgentRunOptions<Schema extends z.ZodType> {
   signal?: AbortSignal;
   // A follow-up run that only rewrites <result>; the original commits are kept.
   resultRepair?: boolean;
+  // Host directory mounted writable at /afk-out for this agent run. Absent on repair runs and gates.
+  resultDir?: string;
 }
 
 export interface AgentRunResult<Output> {
@@ -843,7 +850,7 @@ export function repairRunOptions<S extends z.ZodType>(
   promptFile: string,
   branch: string,
 ): AgentRunOptions<S> {
-  const { model: _model, ...rest } = options;
+  const { model: _model, resultDir: _resultDir, ...rest } = options;
   return {
     ...rest,
     promptFile,

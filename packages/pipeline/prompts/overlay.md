@@ -42,7 +42,9 @@
 - 等后台命令时设上限，按这条命令的正常耗时估。超过上限还没有结果，先查进程，不要再等同一个条件，也不要反复等同一个早就没有新输出的命令。
 - 自己之前启动、还在跑的测试或服务，先结束掉，再决定重跑还是放弃。
 - `/context`、`/refs`、契约目录都是只读的。
+- 输出最终消息之前，先停掉自己启动的后台任务。
+- 输出 `<result>` 之后，不再回应任何后台任务通知。
 
 ## 结果
 
-先把结果 JSON 写进 `/tmp/afk-result.json`，跑 `node /home/agent/afk/check-result.mjs <阶段> /tmp/afk-result.json`（阶段名就是 `/context/run.json` 的阶段），改到通过，再把同样的内容放进最后一条消息末尾的 `<result>…</result>`。标签原样保留，里面是一个 JSON 对象，不要加别的字段。
+先把结果 JSON 写进 `/afk-out/result.json`，跑 `node /home/agent/afk/check-result.mjs <阶段> /afk-out/result.json`（阶段名就是 `/context/run.json` 的阶段），改到通过，再把同样的内容放进最后一条消息末尾的 `<result>…</result>`。标签原样保留，里面是一个 JSON 对象，不要加别的字段。

@@ -42,6 +42,10 @@ export interface FakeAgentStep {
   rawLines?: string[]; // Cursor's event lines, as the run produces them
   // The <result> text Sandcastle matched; empty/undefined means the tag was missing
   rawMatched?: string;
+  // Written to the host /afk-out mount as result.json (abnormal-exit recovery).
+  resultFile?: unknown;
+  // Uncommitted files left in the slot clone, so a dirty worktree can be observed after the run.
+  uncommitted?: Record<string, string>;
 }
 
 export interface FakeAgentContext {
@@ -55,6 +59,7 @@ export interface FakeAgentContext {
   wallClockMs: number;
   model?: string;
   resultRepair?: boolean; // a follow-up run that only rewrites <result>
+  resultDir?: string; // host path mounted at /afk-out
 }
 
 export class FakeAgentRunner implements AgentRunner {
@@ -155,6 +160,7 @@ export class FakeAgentRunner implements AgentRunner {
         wallClockMs: options.wallClockMs,
         ...(options.model ? { model: options.model } : {}),
         ...(options.resultRepair ? { resultRepair: true } : {}),
+        ...(options.resultDir ? { resultDir: options.resultDir } : {}),
         prompt: readFileSync(options.promptFile, "utf8"),
         context: (file) => {
           const path = join(options.ctxDir, file);
@@ -189,6 +195,17 @@ export class FakeAgentRunner implements AgentRunner {
             step.message ?? "agent change",
           ]);
         }
+      }
+      if (step.resultFile !== undefined && options.resultDir) {
+        mkdirSync(options.resultDir, { recursive: true });
+        writeFileSync(
+          join(options.resultDir, "result.json"),
+          `${JSON.stringify(step.resultFile)}\n`,
+        );
+      }
+      for (const [path, content] of Object.entries(step.uncommitted ?? {})) {
+        mkdirSync(dirname(join(this.repoDir, path)), { recursive: true });
+        writeFileSync(join(this.repoDir, path), content);
       }
       const commits = gitOrThrow(worktree, [
         "rev-list",
