@@ -1,6 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   failedCasesOf,
   GATE_CONFIG_PATH,
@@ -93,7 +92,10 @@ export async function runBaselineGate(
   if (git(dir, ["cat-file", "-e", `${sha}:${GATE_CONFIG_PATH}`]).code !== 0)
     return refused(`${sha} has no ${GATE_CONFIG_PATH}`);
 
-  const scratch = mkdtempSync(join(tmpdir(), "afk-baseline-"));
+  // Next to the stored clone, not os.tmpdir(): Sandcastle's worktree `.git` file points at
+  // `<clone>/.git/worktrees/…`, and the gate container can only follow that path when it
+  // lives under AFK_HOME (Docker Desktop shares /Users, not always /var/folders).
+  const scratch = mkdtempSync(join(dirname(dir), "baseline-"));
   try {
     const work = join(scratch, repo.name);
     gitOrThrow(scratch, ["clone", "--quiet", "--no-checkout", dir, work]);
