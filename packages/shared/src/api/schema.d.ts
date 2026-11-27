@@ -2675,6 +2675,10 @@ export interface paths {
               };
               sha?: string;
               specId: number;
+              recut?: {
+                branch: string;
+                planningSha?: string;
+              };
             };
           };
         };
@@ -6035,6 +6039,78 @@ export interface paths {
       requestBody?: never;
       responses: {
         /** @description Running again although the baseline gate failed */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "draft"
+                | "planned"
+                | "running"
+                | "finalizing"
+                | "awaiting-review"
+                | "partially-merged"
+                | "reworking"
+                | "merged"
+                | "paused"
+                | "cancelled";
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not paused by baseline-gate-failed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/recheck-baseline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Integration branches recut from current main; baseline gates run again */
         200: {
           headers: {
             [name: string]: unknown;

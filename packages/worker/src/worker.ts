@@ -17,6 +17,7 @@ import {
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { BASELINE_GATE_JOB, runBaselineGate } from "./baseline.ts";
 import { withCredentials } from "./credentials.ts";
+import { recutIntegrationBranch } from "./domain.ts";
 import {
   type ExecutorDeps,
   executeStage,
@@ -337,6 +338,37 @@ export async function processJob(
       const task = await api.baselineTask(job);
       if (task === "lost") return "abandoned";
       const deps = await withCredentials({ ...executor, api }, task.repo.url);
+      if (task.recut) {
+        if (!task.sha)
+          throw new InfrastructureError(
+            "recut requires the new integration-branch cut SHA",
+          );
+        const mainDir = await deps.repos.ensure(
+          task.repo.name,
+          task.repo.url,
+          task.repo.defaultBranch,
+        );
+        try {
+          await recutIntegrationBranch(
+            deps.repos,
+            deps.push,
+            mainDir,
+            {
+              repo: task.repo,
+              branch: task.recut.branch,
+              mainSha: task.sha,
+              ...(task.recut.planningSha
+                ? { planningSha: task.recut.planningSha }
+                : {}),
+            },
+            log,
+          );
+        } catch (error) {
+          throw new InfrastructureError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
       const body = await runBaselineGate(
         {
           ...deps,

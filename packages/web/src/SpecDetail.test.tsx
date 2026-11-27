@@ -1050,6 +1050,37 @@ describe("the spec page", () => {
     );
   });
 
+  it("offers 重新检查 beside 不管它继续 for a spec paused by baseline-gate-failed", async () => {
+    const fake = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: {
+            state: "paused",
+            pauseReason: "baseline-gate-failed",
+            baselineFailures: [
+              {
+                repo: "backend",
+                reasons: ["test failed (exit 1)"],
+                failingTests: ["orders exports"],
+                run: { id: 7, displayId: "R-7" },
+              },
+            ],
+          },
+        }),
+      }),
+      "POST /specs/1/recheck-baseline": () => ({
+        json: { state: "paused" },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, fake);
+    expect(await screen.findByText(/已暂停: 基线门禁失败/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "不管它继续" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重新检查" }));
+    await waitFor(() =>
+      expect(fake.calls).toContain("POST /specs/1/recheck-baseline"),
+    );
+  });
+
   it("shows 返工中 on the heading and the flow banner", async () => {
     renderWithApp(
       <SpecDetail specId={1} />,

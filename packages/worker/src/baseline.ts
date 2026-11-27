@@ -22,6 +22,10 @@ export interface BaselineGateTask {
   repo: { name: string; url: string; defaultBranch: string };
   sha?: string;
   specId: number;
+  recut?: {
+    branch: string;
+    planningSha?: string;
+  };
 }
 
 export interface BaselineGateResult {
