@@ -1014,6 +1014,42 @@ describe("the spec page", () => {
     expect(screen.getByText(/已暂停: agent 时间用完/)).toBeTruthy();
   });
 
+  it("lists baseline-gate failures and offers 不管它继续", async () => {
+    const fake = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: {
+            state: "paused",
+            pauseReason: "baseline-gate-failed",
+            baselineFailures: [
+              {
+                repo: "backend",
+                reasons: ["test failed (exit 1)"],
+                failingTests: ["orders exports"],
+                run: { id: 7, displayId: "R-7" },
+              },
+            ],
+          },
+        }),
+      }),
+      "POST /specs/1/continue-baseline": () => ({
+        json: { state: "running" },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, fake);
+    expect(await screen.findByText(/已暂停: 基线门禁失败/)).toBeTruthy();
+    expect(
+      screen.getByTestId("baseline-failure-backend").textContent,
+    ).toContain("orders exports");
+    expect(screen.getByRole("link", { name: "R-7" }).getAttribute("href")).toBe(
+      "/runs/7",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "不管它继续" }));
+    await waitFor(() =>
+      expect(fake.calls).toContain("POST /specs/1/continue-baseline"),
+    );
+  });
+
   it("shows 返工中 on the heading and the flow banner", async () => {
     renderWithApp(
       <SpecDetail specId={1} />,

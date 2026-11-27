@@ -8,6 +8,7 @@ import {
   type ReadinessTask,
   type TrialMergeTask,
 } from "@afk/shared";
+import type { BaselineGateTask } from "./baseline.ts";
 
 // The worker talks to the platform over HTTP only (docs/specs/m1-platform.md「worker 专用接口」): it has no
 // database connection and does not import the api package. Every call that concerns a job carries
@@ -35,6 +36,7 @@ export interface WorkerApi {
   hostTask(job: ClaimedJob): Promise<HostTask | "lost">;
   planningTask(job: ClaimedJob): Promise<PlanningTask | "lost">;
   readinessTask(job: ClaimedJob): Promise<ReadinessTask | "lost">;
+  baselineTask(job: ClaimedJob): Promise<BaselineGateTask | "lost">;
   trialMergeTask(job: ClaimedJob): Promise<TrialMergeTask | "lost">;
   // Is this job still running under a live lease at this attempt? Throws when the API cannot be asked.
   isHeld(jobId: number, attempt: number): Promise<boolean>;
@@ -177,6 +179,20 @@ export function createWorkerApi(
       if (data) return data;
       if (holding(response.status) === "lost") return "lost";
       throw new Error(`readiness task failed: HTTP ${response.status}`);
+    },
+    async baselineTask(job) {
+      const { data, response } = await client.GET(
+        "/worker/jobs/{id}/baseline-task",
+        {
+          params: {
+            path: { id: job.id },
+            query: { workerId, attempt: job.attempt },
+          },
+        },
+      );
+      if (data) return data;
+      if (holding(response.status) === "lost") return "lost";
+      throw new Error(`baseline task failed: HTTP ${response.status}`);
     },
     async complete(job, result) {
       const { params, body } = call(job);

@@ -100,6 +100,8 @@ function actionText(
       return ticket ? `交回 ${ticket}` : "交回";
     case "edit-refs":
       return "改参考仓库";
+    case "continue-baseline":
+      return "不管它继续";
     default:
       return action;
   }
