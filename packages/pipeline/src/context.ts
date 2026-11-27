@@ -35,6 +35,8 @@ export interface ContextInput {
   domain?: { path: string; content: string }[];
   // This repo's gate at the trusted commit: named commands, setup listed on its own.
   gate?: GateConfig;
+  // Last failed run's uncommitted diff. Omitted when missing or larger than 1 MB.
+  salvageDiff?: string;
 }
 
 export type RunGate = {
@@ -163,6 +165,14 @@ export function renderContext(input: ContextInput): void {
   );
   if (bundle.note) {
     writeFileSync(join(dir, "note.md"), bundle.note);
+  }
+  if (
+    input.salvageDiff !== undefined &&
+    Buffer.byteLength(input.salvageDiff, "utf8") <= 1_000_000
+  ) {
+    writeFileSync(join(dir, "salvage.diff"), input.salvageDiff, {
+      mode: 0o444,
+    });
   }
   if (input.failureLog !== undefined) {
     mkdirSync(join(dir, "failure"), { recursive: true });

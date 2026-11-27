@@ -473,6 +473,7 @@ export async function processJob(
               ...(error.orphanRef && error.orphanSha
                 ? { orphanRef: error.orphanRef, orphanSha: error.orphanSha }
                 : {}),
+              ...(error.salvage ? { salvage: error.salvage } : {}),
             }
           : undefined,
         error instanceof InfrastructureError ? error.extraRuns : undefined,

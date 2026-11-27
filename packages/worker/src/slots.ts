@@ -338,6 +338,16 @@ function readLast(path: string): SlotTask | undefined {
   }
 }
 
+export const SALVAGE_DIFF_MAX_BYTES = 1_000_000;
+
+export type SalvageCommit = { sha: string; subject: string };
+
+export type FailSalvage = {
+  commits: SalvageCommit[];
+  hadDiff: boolean;
+  diffTooLarge: boolean;
+};
+
 export interface RetrieveResult {
   fetched: boolean;
   extraRefs: string[]; // refs the slot has besides the ticket's own: logged, never taken back
@@ -414,4 +424,105 @@ function uncommittedChanges(clone: string): string | undefined {
     parts.push(`# ${place}\n${diff}`);
   }
   return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
+export function salvageDiffFile(jobId: number, attempt: number): string {
+  return `job-${jobId}-attempt-${attempt}.diff`;
+}
+
+export function latestSalvageDiffFile(ref: string): string {
+  return `latest-${ref.replaceAll("/", "-")}.diff`;
+}
+
+function commitsOnBranch(
+  mainClone: string,
+  ref: string,
+  integration?: string,
+): SalvageCommit[] {
+  if (
+    git(mainClone, ["rev-parse", "--verify", "--quiet", `refs/heads/${ref}`])
+      .code !== 0
+  ) {
+    return [];
+  }
+  const base =
+    integration &&
+    git(mainClone, [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/heads/${integration}`,
+    ]).code === 0
+      ? integration
+      : undefined;
+  const range = base ? `${base}..${ref}` : ref;
+  return git(mainClone, ["log", "--format=%H\t%s", "--reverse", range])
+    .stdout.split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const tab = line.indexOf("\t");
+      return {
+        sha: line.slice(0, tab < 0 ? line.length : tab),
+        subject: tab < 0 ? "" : line.slice(tab + 1),
+      };
+    });
+}
+
+// An agent-stage job that failed (not recovered-after-exit): take the ticket branch back now, and keep
+// uncommitted work as a diff, so the next Run — on any slot — can continue from here. The clone stays
+// until release("failure"); rebuild salvage is a separate path (#386).
+export function salvageFailedSlot(input: {
+  slotClone: string;
+  mainClone: string;
+  task: SlotTask;
+  salvageDir: string;
+  log?: (line: string) => void;
+}): FailSalvage {
+  const taken = retrieveResult({
+    slotClone: input.slotClone,
+    mainClone: input.mainClone,
+    ref: input.task.ref,
+    ...(input.task.integration ? { integration: input.task.integration } : {}),
+    ...(input.task.defaultBranch
+      ? { defaultBranch: input.task.defaultBranch }
+      : {}),
+    log: input.log,
+  });
+  if (taken.error)
+    input.log?.(`could not take back ${input.task.ref} (${taken.error})`);
+  const commits = commitsOnBranch(
+    input.mainClone,
+    input.task.ref,
+    input.task.integration,
+  );
+  const diff = existsSync(input.slotClone)
+    ? uncommittedChanges(input.slotClone)
+    : undefined;
+  if (!diff) return { commits, hadDiff: false, diffTooLarge: false };
+  const bytes = Buffer.byteLength(diff, "utf8");
+  const diffTooLarge = bytes > SALVAGE_DIFF_MAX_BYTES;
+  mkdirSync(input.salvageDir, { recursive: true });
+  const jobFile = join(
+    input.salvageDir,
+    salvageDiffFile(input.task.jobId, input.task.attempt),
+  );
+  writeFileSync(jobFile, diff);
+  input.log?.(`saved uncommitted changes to ${jobFile}`);
+  if (!diffTooLarge) {
+    writeFileSync(
+      join(input.salvageDir, latestSalvageDiffFile(input.task.ref)),
+      diff,
+    );
+  }
+  return { commits, hadDiff: true, diffTooLarge };
+}
+
+export function readLatestSalvageDiff(
+  salvageDir: string,
+  ref: string,
+): string | undefined {
+  const path = join(salvageDir, latestSalvageDiffFile(ref));
+  if (!existsSync(path)) return undefined;
+  if (statSync(path).size > SALVAGE_DIFF_MAX_BYTES) return undefined;
+  return readFileSync(path, "utf8");
 }

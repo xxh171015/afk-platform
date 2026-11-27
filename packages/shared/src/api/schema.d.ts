@@ -2958,6 +2958,14 @@ export interface paths {
               cursorCliVersion?: string;
               /** @enum {string} */
               axis?: "standards" | "spec";
+              salvage?: {
+                commits: {
+                  sha: string;
+                  subject: string;
+                }[];
+                hadDiff: boolean;
+                diffTooLarge?: boolean;
+              };
             };
             extraRuns?: {
               tokenUsage?: unknown;
@@ -2965,6 +2973,14 @@ export interface paths {
               cursorCliVersion?: string;
               /** @enum {string} */
               axis?: "standards" | "spec";
+              salvage?: {
+                commits: {
+                  sha: string;
+                  subject: string;
+                }[];
+                hadDiff: boolean;
+                diffTooLarge?: boolean;
+              };
             }[];
             orphanRef?: string;
             orphanSha?: string;

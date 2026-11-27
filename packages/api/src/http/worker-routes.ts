@@ -763,6 +763,20 @@ const FailRunFacts = z.object({
   durationApiMs: z.number().int().min(0).optional(),
   cursorCliVersion: z.string().optional(),
   axis: z.enum(REVIEW_AXES).optional(),
+  salvage: z
+    .object({
+      commits: z
+        .array(
+          z.object({
+            sha: z.string().min(1).max(64),
+            subject: z.string().max(500),
+          }),
+        )
+        .max(200),
+      hadDiff: z.boolean(),
+      diffTooLarge: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const failRoute = holderRoute(

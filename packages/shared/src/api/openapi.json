@@ -5333,6 +5333,37 @@
                       "axis": {
                         "type": "string",
                         "enum": ["standards", "spec"]
+                      },
+                      "salvage": {
+                        "type": "object",
+                        "properties": {
+                          "commits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "sha": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64
+                                },
+                                "subject": {
+                                  "type": "string",
+                                  "maxLength": 500
+                                }
+                              },
+                              "required": ["sha", "subject"]
+                            },
+                            "maxItems": 200
+                          },
+                          "hadDiff": {
+                            "type": "boolean"
+                          },
+                          "diffTooLarge": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["commits", "hadDiff"]
                       }
                     }
                   },
@@ -5352,6 +5383,37 @@
                         "axis": {
                           "type": "string",
                           "enum": ["standards", "spec"]
+                        },
+                        "salvage": {
+                          "type": "object",
+                          "properties": {
+                            "commits": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "sha": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "subject": {
+                                    "type": "string",
+                                    "maxLength": 500
+                                  }
+                                },
+                                "required": ["sha", "subject"]
+                              },
+                              "maxItems": 200
+                            },
+                            "hadDiff": {
+                              "type": "boolean"
+                            },
+                            "diffTooLarge": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["commits", "hadDiff"]
                         }
                       }
                     },

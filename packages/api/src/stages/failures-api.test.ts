@@ -736,6 +736,82 @@ describe("a job the worker could not carry out", () => {
     expect((await worker.fail(job.id, job.attempt, "x")).status).toBe(200);
     expect((await keys())[0]?.state).toBe("failed");
   });
+
+  it("leaves a Retry note on the next implement Run after a job-failed requeue, with retrieved commits and salvage.diff", async () => {
+    await runningSpec([ticket("a")]);
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("implement");
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [
+              {
+                sha: "abc1111111111111111111111111111111111111",
+                subject: "export orders as csv",
+              },
+            ],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const failed = (
+      await db.pool.query<{ output: Record<string, unknown> }>(
+        "SELECT output FROM runs WHERE job_id = $1",
+        [job.id],
+      )
+    ).rows[0];
+    expect(failed.output).toMatchObject({
+      error: "Error: agent crashed",
+      salvage: {
+        commits: [
+          {
+            sha: "abc1111111111111111111111111111111111111",
+            subject: "export orders as csv",
+          },
+        ],
+        hadDiff: true,
+        diffTooLarge: false,
+      },
+    });
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("implement");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
+    expect(note).toContain("export orders as csv");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).toContain("先核对验收测试");
+    expect(note).toContain("已完成就直接出结果");
+  });
+
+  it("says the uncommitted diff was too large when the worker omitted it", async () => {
+    await runningSpec([ticket("a")]);
+    const job = (await claim()) as Claimed;
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: { commits: [], hadDiff: true, diffTooLarge: true },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("太大，没有提供");
+    expect(note).not.toContain("/context/salvage.diff");
+  });
 });
 
 describe("a lease that ran out while the API was down", () => {
@@ -1099,5 +1175,54 @@ describe("a step of the overall review that could not be carried out", () => {
     for (let i = 0; i < 3; i++) await failNext();
     expect((await call("POST", "/specs/1/final/retry")).status).toBe(200);
     expect((await claim())?.payload.stage).toBe("final-review");
+  });
+
+  it("leaves a Retry note on the next final-fix Run after a job-failed requeue", async () => {
+    await toFinalReview();
+    const review = (await claim()) as Claimed;
+    expect(review.payload.stage).toBe("final-review");
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", line: 1, problem: "rename" }],
+          suggestions: [],
+        },
+      },
+      findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
+    });
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("final-fix");
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [
+              {
+                sha: "def2222222222222222222222222222222222222",
+                subject: "rename the helper",
+              },
+            ],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-fix");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
+    expect(note).toContain("rename the helper");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).toContain("先核对验收测试");
   });
 });

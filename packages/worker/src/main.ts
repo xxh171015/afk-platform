@@ -292,6 +292,7 @@ await runWorker({
     model: config.model,
     skillsSha: SKILLS_SHA, // what SANDBOX_SKILLS_DIR was copied at
     secrets: [config.cursorApiKey],
+    salvageDir: join(config.home, "salvage"),
   },
   concurrency: config.slots,
   signal: stop.signal,
