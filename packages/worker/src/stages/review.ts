@@ -1,3 +1,6 @@
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   git,
   gitOrThrow,
@@ -27,6 +30,10 @@ import {
   subjectLabel,
   tip,
 } from "./common.ts";
+import {
+  RECOVERED_AFTER_EXIT_NOTE,
+  wrapRecoverAfterExit,
+} from "./recover-after-exit.ts";
 
 export async function review(
   deps: ExecutorDeps,
@@ -83,6 +90,26 @@ export async function review(
       defaultModel: bundle.model,
       workerModel: deps.model,
     });
+    const logDir = join(
+      deps.sandboxLogsRoot ?? join(deps.tmpRoot ?? tmpdir(), "sandbox-logs"),
+      runIdOf(bundle),
+    );
+    const runner = wrapRecoverAfterExit(
+      deps.makeAgentRunner(slot.dir, runIdOf(bundle), logDir),
+      {
+        resultDirFor: ({ branch: axisBranch }) => {
+          const resultDir = join(
+            logDir,
+            "afk-out",
+            axisBranch.replaceAll("/", "_"),
+          );
+          rmSync(resultDir, { recursive: true, force: true });
+          mkdirSync(resultDir, { recursive: true });
+          return resultDir;
+        },
+        onRecovered: () => log(RECOVERED_AFTER_EXIT_NOTE),
+      },
+    );
     const assembled = await runReview({
       stage,
       ticketReview: bundle.ticketReview,
@@ -90,6 +117,7 @@ export async function review(
       reviewedSha: reviewed,
       baseBranch: bundle.integrationBranch as string,
       subjectLabel: subjectLabel(bundle),
+      runner,
       context: {
         bundle,
         run: { runId: runIdOf(bundle), baseSha, branch: agent },
@@ -104,7 +132,6 @@ export async function review(
           ? { gate: readGateConfig(mainDir, tip(mainDir, integration)) }
           : {}),
       },
-      runner: deps.makeAgentRunner(slot.dir, runIdOf(bundle)),
       idleSeconds: bundle.limits.runIdleSeconds,
       wallClockMs: bundle.limits.runWallclockSeconds * 1000,
       models: {
