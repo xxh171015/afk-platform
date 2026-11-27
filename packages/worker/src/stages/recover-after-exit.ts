@@ -1,10 +1,18 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   AFK_OUT_RESULT_FILE,
   AFK_OUT_RESULT_MAX_BYTES,
+  type AgentRunner,
   type AgentRunResult,
   git,
+  lastAssistantFromCursorLine,
   recoverStructuredOutput,
   resultBlock,
 } from "@afk/pipeline";
@@ -85,11 +93,11 @@ export function recoverAfterAbnormalExit<Output>(input: {
   schema: OutputSchema;
   resultDir: string;
   lastAssistant?: string;
-  slotDir: string;
-  branch: string;
-  baseSha: string;
-  inherited: boolean;
-  requireCommit: boolean;
+  slotDir?: string;
+  branch?: string;
+  baseSha?: string;
+  inherited?: boolean;
+  requireCommit?: boolean;
 }):
   | { kind: "skip" }
   | {
@@ -107,33 +115,40 @@ export function recoverAfterAbnormalExit<Output>(input: {
     input.lastAssistant,
   );
   if (output === undefined) return { kind: "job-failure" };
-  if (!slotWorktreeClean(input.slotDir)) return { kind: "job-failure" };
 
-  const status =
-    output && typeof output === "object" && "status" in output
-      ? (output as { status?: unknown }).status
-      : undefined;
-  if (status !== "done" && status !== "cannot-proceed") {
-    return { kind: "job-failure" };
-  }
-  if (status === "cannot-proceed") {
-    const blocked = output as {
-      blockedReason?: unknown;
-      detail?: unknown;
-    };
-    if (
-      typeof blocked.blockedReason !== "string" ||
-      blocked.blockedReason.length === 0 ||
-      typeof blocked.detail !== "string" ||
-      blocked.detail.length === 0
-    ) {
+  let commits = result.commits;
+  if (input.slotDir !== undefined) {
+    if (!slotWorktreeClean(input.slotDir)) return { kind: "job-failure" };
+
+    const status =
+      output && typeof output === "object" && "status" in output
+        ? (output as { status?: unknown }).status
+        : undefined;
+    if (status !== "done" && status !== "cannot-proceed") {
       return { kind: "job-failure" };
     }
-  }
-  const commits = commitsOnBranch(input.slotDir, input.baseSha, input.branch);
-  const hasCommits = commits.length > 0 || input.inherited;
-  if (status === "done" && input.requireCommit && !hasCommits) {
-    return { kind: "job-failure" };
+    if (status === "cannot-proceed") {
+      const blocked = output as {
+        blockedReason?: unknown;
+        detail?: unknown;
+      };
+      if (
+        typeof blocked.blockedReason !== "string" ||
+        blocked.blockedReason.length === 0 ||
+        typeof blocked.detail !== "string" ||
+        blocked.detail.length === 0
+      ) {
+        return { kind: "job-failure" };
+      }
+    }
+    if (input.baseSha === undefined || input.branch === undefined) {
+      return { kind: "job-failure" };
+    }
+    commits = commitsOnBranch(input.slotDir, input.baseSha, input.branch);
+    const hasCommits = commits.length > 0 || Boolean(input.inherited);
+    if (status === "done" && input.requireCommit && !hasCommits) {
+      return { kind: "job-failure" };
+    }
   }
   const originalError = result.error;
   return {
@@ -146,6 +161,58 @@ export function recoverAfterAbnormalExit<Output>(input: {
       resultFix: RECOVERED_AFTER_EXIT,
       error: undefined,
       errorKind: undefined,
+    },
+  };
+}
+
+export function wrapRecoverAfterExit(
+  runner: AgentRunner,
+  input: {
+    resultDirFor: (options: { stage: string; branch: string }) => string;
+    onRecovered?: () => void;
+  },
+): AgentRunner {
+  return {
+    async run(options) {
+      const resultDir =
+        options.resultDir ??
+        input.resultDirFor({
+          stage: options.stage,
+          branch: options.branch,
+        });
+      mkdirSync(resultDir, { recursive: true });
+      let lastAssistant: string | undefined;
+      const result = await runner.run({
+        ...options,
+        resultDir,
+        onRawLine: (line) => {
+          options.onRawLine?.(line);
+          const text = lastAssistantFromCursorLine(line);
+          if (text) lastAssistant = text;
+        },
+      });
+      const recovered = recoverAfterAbnormalExit({
+        result,
+        schema: options.schema,
+        resultDir,
+        lastAssistant,
+      });
+      if (recovered.kind !== "recovered") return result;
+      input.onRecovered?.();
+      const output = recovered.result.output;
+      return {
+        ...recovered.result,
+        output:
+          output !== undefined &&
+          typeof output === "object" &&
+          output !== null &&
+          !Array.isArray(output)
+            ? ({
+                ...output,
+                error: recovered.originalError,
+              } as typeof output)
+            : output,
+      };
     },
   };
 }
