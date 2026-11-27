@@ -8577,6 +8577,9 @@
                         "totalMs"
                       ]
                     },
+                    "wastedAgentMs": {
+                      "type": "integer"
+                    },
                     "links": {
                       "type": "array",
                       "items": {
@@ -8757,6 +8760,7 @@
                     "finalRuns",
                     "potentialConflicts",
                     "leadTime",
+                    "wastedAgentMs",
                     "links",
                     "usageByStage",
                     "cleanup",
@@ -16599,6 +16603,45 @@
                               },
                               "required": ["pausedMinutes", "automatic"]
                             }
+                          },
+                          "wastedAgent": {
+                            "type": "object",
+                            "properties": {
+                              "totalMs": {
+                                "type": "integer"
+                              },
+                              "recoveredAfterExit": {
+                                "type": "integer"
+                              },
+                              "byStage": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "source": {
+                                      "type": "string",
+                                      "enum": [
+                                        "external",
+                                        "platform",
+                                        "cancelled"
+                                      ]
+                                    },
+                                    "durationMs": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": ["stage", "source", "durationMs"]
+                                }
+                              }
+                            },
+                            "required": [
+                              "totalMs",
+                              "recoveredAfterExit",
+                              "byStage"
+                            ]
                           }
                         },
                         "required": [
@@ -16607,7 +16650,8 @@
                           "attribution",
                           "failureRate",
                           "success",
-                          "agentsPauses"
+                          "agentsPauses",
+                          "wastedAgent"
                         ]
                       }
                     }

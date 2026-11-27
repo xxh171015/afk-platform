@@ -4120,6 +4120,7 @@ export interface paths {
                 waitingMs: number;
                 totalMs: number;
               } | null;
+              wastedAgentMs: number;
               links: {
                 /** @enum {string} */
                 kind: "ticket" | "pr";
@@ -7916,6 +7917,16 @@ export interface paths {
                   pausedMinutes: number;
                   automatic: boolean;
                 }[];
+                wastedAgent: {
+                  totalMs: number;
+                  recoveredAfterExit: number;
+                  byStage: {
+                    stage: string;
+                    /** @enum {string} */
+                    source: "external" | "platform" | "cancelled";
+                    durationMs: number;
+                  }[];
+                };
               }[];
             };
           };

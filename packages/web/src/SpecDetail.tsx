@@ -135,6 +135,7 @@ export function SpecDetail({
     finalRuns,
     potentialConflicts,
     leadTime,
+    wastedAgentMs,
     usageByStage,
     links,
     autoMerge,
@@ -383,6 +384,7 @@ export function SpecDetail({
           hostKind={hostKind}
           potentialConflicts={potentialConflicts ?? []}
           leadTime={leadTime ?? null}
+          wastedAgentMs={wastedAgentMs ?? 0}
           usageByStage={usageByStage ?? []}
           links={links ?? []}
         />
