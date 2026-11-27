@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -28,6 +28,10 @@ import {
   tip,
   withEnvironment,
 } from "./common.ts";
+import {
+  RECOVERED_AFTER_EXIT_NOTE,
+  wrapRecoverAfterExit,
+} from "./recover-after-exit.ts";
 
 // After a failed e2e: an agent in a fresh integration environment, on the repo at the head of its integration
 // branch, finds out which repo is at fault. It only diagnoses: whatever it commits is thrown away with its branch.
@@ -51,13 +55,27 @@ export async function diagnose(
     gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, head]);
     try {
       bringBranches(slot, mainDir, [branch]);
+      const logDir = join(
+        deps.sandboxLogsRoot ?? join(deps.tmpRoot ?? tmpdir(), "sandbox-logs"),
+        runIdOf(bundle),
+      );
+      const resultDir = join(logDir, "afk-out");
+      rmSync(resultDir, { recursive: true, force: true });
+      mkdirSync(resultDir, { recursive: true });
+      const runner = wrapRecoverAfterExit(
+        deps.makeAgentRunner(slot.dir, runIdOf(bundle), logDir),
+        {
+          resultDirFor: () => resultDir,
+          onRecovered: () => log(RECOVERED_AFTER_EXIT_NOTE),
+        },
+      );
       const run = await withEnvironment(
         deps,
         context,
         "diagnose",
         async (environment) => ({
           environment,
-          run: await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
+          run: await runner.run({
             stage: "diagnose",
             branch,
             baseBranch: integration,
@@ -65,6 +83,7 @@ export async function diagnose(
             ctxDir,
             refs,
             schema: DiagnoseOutputSchema,
+            resultDir,
             placement: { network: environment.network, env: environment.env },
             ...options,
             signal: context.signal,

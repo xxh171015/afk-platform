@@ -33,6 +33,15 @@ const emptyWeek = (weekStart: string) => ({
     untouchedRate: null,
   },
   agentsPauses: [] as { pausedMinutes: number; automatic: boolean }[],
+  wastedAgent: {
+    totalMs: 0,
+    recoveredAfterExit: 0,
+    byStage: [] as {
+      stage: string;
+      source: "external" | "platform" | "cancelled";
+      durationMs: number;
+    }[],
+  },
 });
 
 const weekStarts = lastWeekStarts(new Date("2026-11-09T12:00:00+08:00"));
@@ -77,6 +86,15 @@ const weeks = weekStarts.map((weekStart, i) =>
           { pausedMinutes: 15, automatic: true },
           { pausedMinutes: 125, automatic: false },
         ],
+        wastedAgent: {
+          totalMs: 105_000,
+          recoveredAfterExit: 2,
+          byStage: [
+            { stage: "implement", source: "platform", durationMs: 60_000 },
+            { stage: "review", source: "cancelled", durationMs: 30_000 },
+            { stage: "final-review", source: "external", durationMs: 15_000 },
+          ],
+        },
       },
 );
 
@@ -200,5 +218,24 @@ describe("the metrics page", () => {
     fireEvent.click(screen.getByRole("button", { name: `工期 ${first}` }));
     expect(screen.getByRole("link", { name: "S-2 Old spec" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "S-1 Order export" })).toBeNull();
+  });
+
+  it("shows 没有产出的 agent 时间 by week, split by stage and failure class, and 断线但已收下 counts", async () => {
+    renderWithApp(<Metrics />, server());
+    const wasted = await screen.findByTestId("metrics-wasted-agent");
+    expect(wasted.textContent).toContain("没有产出的 agent 时间");
+    expect(wasted.textContent).toContain(weekStarts.at(-1));
+    expect(wasted.textContent).toContain("实现");
+    expect(wasted.textContent).toContain("平台");
+    expect(wasted.textContent).toContain("1m 00s");
+    expect(wasted.textContent).toContain("自审");
+    expect(wasted.textContent).toContain("取消");
+    expect(wasted.textContent).toContain("30s");
+    expect(wasted.textContent).toContain("终审");
+    expect(wasted.textContent).toContain("外部服务");
+    expect(wasted.textContent).toContain("15s");
+    expect(wasted.textContent).toContain("断线但已收下");
+    expect(wasted.textContent).toContain("2");
+    expect(wasted.textContent).not.toContain(weekStarts[0]);
   });
 });

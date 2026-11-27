@@ -61,6 +61,7 @@ export async function findPassingGate(
   pool: Queryable,
   jobId: number,
   lookup: GateLookup,
+  kinds: readonly string[] = ["gate"],
 ): Promise<StoredGateRow | null> {
   const { rows } = await pool.query<{
     commit_sha: string;
@@ -71,12 +72,12 @@ export async function findPassingGate(
   }>(
     `SELECT g.commit_sha, g.command_results, g.tests_total, g.tests_skipped, g.test_cases_hash
      FROM jobs j JOIN gate_results g ON g.repo_id = (j.payload->>'repoId')::int
-     WHERE j.id = $1 AND g.tree_sha = $2 AND g.config_blob = $3 AND g.kind = 'gate' AND g.tests_total IS NOT NULL
+     WHERE j.id = $1 AND g.tree_sha = $2 AND g.config_blob = $3 AND g.kind = ANY($4::text[]) AND g.tests_total IS NOT NULL
        AND NOT EXISTS (
          SELECT 1 FROM jsonb_array_elements(g.command_results) s WHERE (s->>'exitCode')::int <> 0
        )
      ORDER BY g.id DESC LIMIT 1`,
-    [jobId, lookup.tree, lookup.configBlob],
+    [jobId, lookup.tree, lookup.configBlob, [...kinds]],
   );
   const row = rows[0];
   if (!row) return null;

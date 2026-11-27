@@ -15,6 +15,7 @@ import {
   tryParseRepoUrl,
 } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
+import { BASELINE_GATE_JOB, runBaselineGate } from "./baseline.ts";
 import { withCredentials } from "./credentials.ts";
 import {
   type ExecutorDeps,
@@ -327,6 +328,27 @@ export async function processJob(
       // fetches the branch with that repo's token
       const deps = await withCredentials({ ...executor, api }, task.repo.url);
       const body = await runReadinessGate(deps, task, log, lost.signal);
+      if (lost.signal.aborted) return "abandoned";
+      if ((await handOver(options, job, body, log)) !== "held")
+        return "abandoned";
+      return "completed";
+    }
+    if (job.type === BASELINE_GATE_JOB) {
+      const task = await api.baselineTask(job);
+      if (task === "lost") return "abandoned";
+      const deps = await withCredentials({ ...executor, api }, task.repo.url);
+      const body = await runBaselineGate(
+        {
+          ...deps,
+          records: {
+            findPassed: (tree, configBlob) =>
+              api.gateResult(job, { tree, configBlob }),
+          },
+        },
+        task,
+        log,
+        lost.signal,
+      );
       if (lost.signal.aborted) return "abandoned";
       if ((await handOver(options, job, body, log)) !== "held")
         return "abandoned";

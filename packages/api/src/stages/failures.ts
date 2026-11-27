@@ -52,6 +52,10 @@ import {
   readFinalPayload,
   readStagePayload,
 } from "../jobs/stage-jobs.ts";
+import {
+  baselineGateFailed,
+  readBaselineGatePayload,
+} from "../planning/baseline-gate.ts";
 import { recordLocateJobFailure } from "../planning/locate-bug.ts";
 import {
   planningCommitFailed,
@@ -313,6 +317,17 @@ export async function recordJobFailure(
     const outcome = await planningCommitFailed(
       client,
       planning,
+      MAX_JOB_FAILURES,
+    );
+    return outcome === "ignored"
+      ? { status: "ignored" }
+      : { status: outcome, failures: MAX_JOB_FAILURES };
+  }
+  const baseline = readBaselineGatePayload(job);
+  if (baseline) {
+    const outcome = await baselineGateFailed(
+      client,
+      baseline,
       MAX_JOB_FAILURES,
     );
     return outcome === "ignored"

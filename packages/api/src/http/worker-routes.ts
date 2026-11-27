@@ -1,4 +1,5 @@
 import {
+  BASELINE_GATE_JOB,
   DECISION_KINDS,
   HOST_KINDS,
   REVIEW_AXES,
@@ -76,6 +77,11 @@ import {
   heartbeat,
   isLeaseLive,
 } from "../jobs/queue.ts";
+import {
+  baselineGateTask,
+  readBaselineGatePayload,
+  recordBaselineResult,
+} from "../planning/baseline-gate.ts";
 import {
   markLocateClaimed,
   readLocatePayload,
@@ -643,6 +649,45 @@ const readinessTaskRoute = createRoute({
   },
 });
 
+const baselineTaskRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/baseline-task",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({
+      workerId: z.string().min(1).max(200),
+      attempt: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: {
+      description:
+        "What a baseline-gate job has to do: run the repo's gate on the integration-branch cut SHA",
+      content: {
+        "application/json": {
+          schema: z.object({
+            repo: z.object({
+              name: z.string(),
+              url: z.string(),
+              defaultBranch: z.string(),
+            }),
+            sha: z.string().optional(),
+            specId: z.number().int(),
+          }),
+        },
+      },
+    },
+    404: {
+      description: "No such job, or not a baseline-gate job",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+    409: {
+      description: "Not the lease holder at the current attempt (fencing)",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+  },
+});
+
 const trialMergeTaskRoute = createRoute({
   method: "get",
   path: "/worker/jobs/{id}/trial-merge-task",
@@ -1069,16 +1114,21 @@ export function registerWorkerRoutes(
             return finished;
           }
           const planning = readPlanningPayload(job.rows[0]);
+          const baseline = readBaselineGatePayload(job.rows[0]);
           // the e2e before the pull requests runs the ticket stages, but for the spec's finalization
           const recorded = planning
             ? await recordPlanningResult(client, planning, result).then(
                 () => ({ status: "planning-commit" }) as const,
               )
-            : readFinalE2ePayload(job.rows[0].payload)
-              ? await recordFinalE2eResult(client, job.rows[0], result).then(
-                  () => ({ status: "final-e2e" }) as const,
+            : baseline
+              ? await recordBaselineResult(client, job.rows[0], result).then(
+                  () => ({ status: "baseline-gate" }) as const,
                 )
-              : await recordStageResult(client, job.rows[0], result);
+              : readFinalE2ePayload(job.rows[0].payload)
+                ? await recordFinalE2eResult(client, job.rows[0], result).then(
+                    () => ({ status: "final-e2e" }) as const,
+                  )
+                : await recordStageResult(client, job.rows[0], result);
           // not a ticket stage: it may be a step of a finalization, or a job for the code host
           if (recorded.status === "no-ticket") {
             const updated = await recordUpdateBranchResult(
@@ -1233,6 +1283,29 @@ export function registerWorkerRoutes(
     return c.json(task, 200);
   });
 
+  app.openapi(baselineTaskRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt } = c.req.valid("query");
+    const holder = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (holder.status !== "ok") {
+      const { body, status } = refusal(holder);
+      return c.json(body, status);
+    }
+    const job = await context.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
+    const payload = job.rows[0] && readBaselineGatePayload(job.rows[0]);
+    const task = payload && (await baselineGateTask(context.pool, payload));
+    if (!task) return c.json({ error: "this job is not a baseline gate" }, 404);
+    return c.json(task, 200);
+  });
+
   app.openapi(trialMergeTaskRoute, async (c) => {
     const { id } = c.req.valid("param");
     const { workerId, attempt } = c.req.valid("query");
@@ -1305,7 +1378,20 @@ export function registerWorkerRoutes(
       const { body, status } = refusal(held);
       return c.json(body, status);
     }
-    const gate = await findPassingGate(context.pool, id, { tree, configBlob });
+    const job = await context.pool.query<{ type: string }>(
+      "SELECT type FROM jobs WHERE id = $1",
+      [id],
+    );
+    const kinds =
+      job.rows[0]?.type === BASELINE_GATE_JOB
+        ? ["gate", "baseline-gate"]
+        : ["gate"];
+    const gate = await findPassingGate(
+      context.pool,
+      id,
+      { tree, configBlob },
+      kinds,
+    );
     return c.json({ gate }, 200);
   });
 

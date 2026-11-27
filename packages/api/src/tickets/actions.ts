@@ -1098,12 +1098,27 @@ async function lockedSpecState(
 async function unpauseSpec(
   pool: pg.Pool,
   specId: number,
-  action: Extract<HumanAction, "retry" | "allow">,
+  action: Extract<HumanAction, "retry" | "allow" | "continue-baseline">,
   extraSeconds: number,
 ): Promise<ActionResult<{ state: SpecState }>> {
   return inTransaction(pool, async (client) => {
     const state = await lockedSpecState(client, specId);
     if (!state) return { status: "no-ticket" };
+    if (action === "continue-baseline") {
+      const paused = await client.query<{ pause_reason: string | null }>(
+        "SELECT pause_reason FROM specs WHERE id = $1",
+        [specId],
+      );
+      if (paused.rows[0]?.pause_reason !== "baseline-gate-failed") {
+        return refused(
+          `only a spec paused by baseline-gate-failed can continue anyway; this one is ${state}${paused.rows[0]?.pause_reason ? ` (${paused.rows[0].pause_reason})` : ""}`,
+        );
+      }
+      await client.query(
+        "UPDATE specs SET baseline_gate_state = 'waived' WHERE id = $1",
+        [specId],
+      );
+    }
     const allowed = specTransition(state, "resume");
     if (!allowed.ok) return refused(allowed.reason);
     const resumeFacts = await finalizationResumeFacts(client, specId);
@@ -1190,6 +1205,13 @@ export async function resumeSpec(
   extraSeconds = 0,
 ): Promise<ActionResult<{ state: SpecState }>> {
   return unpauseSpec(pool, specId, "retry", extraSeconds);
+}
+
+export async function continueBaseline(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return unpauseSpec(pool, specId, "continue-baseline", 0);
 }
 
 export async function allowSpec(

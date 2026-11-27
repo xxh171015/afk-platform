@@ -2736,6 +2736,22 @@ describe("what a person sees", () => {
       },
     ]);
   });
+
+  it("sums unproductive agent Run duration on the spec, including finalize Runs", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, ticket_id, stage, result, duration_ms, token_usage)
+       VALUES
+         ($1, 1, 1, 'implement', 'job-failed', 60000, NULL),
+         ($1, 1, 1, 'review', 'cancelled', 25000, NULL),
+         ($1, 1, NULL, 'final-review', 'job-failed', 40000, NULL),
+         ($1, 1, 1, 'gate', 'job-failed', 99000, NULL),
+         ($1, 1, 1, 'implement', 'done', NULL, '{"inputTokens":9999}'::jsonb)`,
+      [specId],
+    );
+    const spec = await call("GET", `/specs/${specId}`);
+    expect(spec.body.wastedAgentMs).toBe(125_000);
+  });
 });
 
 describe("the spec timeline", () => {

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { git, gitOut } from "@afk/pipeline";
@@ -12,7 +12,11 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import type { TicketAlign } from "../align-ticket-branch.ts";
 import type { ClaimedJob } from "../api.ts";
-import type { ExecutorDeps, StageOutcomeBody } from "../executor.ts";
+import {
+  type ExecutorDeps,
+  InfrastructureError,
+  type StageOutcomeBody,
+} from "../executor.ts";
 import { pushRef } from "../push.ts";
 import { RepoStore } from "../repos.ts";
 import type { Slot } from "../slots.ts";
@@ -92,18 +96,19 @@ function slot(ref: string): Slot {
 function context(
   bundle: ReturnType<typeof bundleFor>,
   payload: Record<string, unknown> = {},
+  logs?: string[],
 ): {
   job: ClaimedJob;
   bundle: ReturnType<typeof bundleFor>;
   signal: AbortSignal;
-  log: () => void;
+  log: (line: string) => void;
   logRaw: () => void;
 } {
   return {
     job: { ...job, payload },
     bundle,
     signal: new AbortController().signal,
-    log: () => {},
+    log: logs ? (line) => logs.push(line) : () => {},
     logRaw: () => {},
   };
 }
@@ -387,5 +392,85 @@ describe("result format repair after update-branch", () => {
     expect(
       runner.calls.filter((call) => call.stage === "recheck"),
     ).toHaveLength(2);
+  });
+});
+
+const CRASH = { kind: "other" as const, message: "Error: Premature close" };
+
+describe("recover after an abnormal agent exit", () => {
+  it("Recheck: an abnormal exit with a valid result file is pass with resultFix recovered-after-exit", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.ts": "export const n = 1;\n",
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit({ "src/a.ts": "export const n = 2;\n" }, "spec work");
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/S-12-update"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/S-12-update"]);
+    const logs: string[] = [];
+    const runner = new FakeAgentRunner(slotDir, (ctx) => {
+      expect(readdirSync(ctx.resultDir as string)).toEqual([]);
+      return {
+        resultFile: PASS,
+        uncommitted: { "src/dirty.ts": "left behind\n" },
+        error: CRASH,
+      };
+    });
+    const outcome = await recheck(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "recheck",
+          ticket: null,
+          agentBranch: "agent/S-12-update",
+          integrationBranch: "spec/s",
+        }),
+        {},
+        logs,
+      ),
+      repo.dir,
+      slot("agent/S-12-update"),
+    );
+    expect(outcome.outcome).toBe("pass");
+    expect(outcome.run).toMatchObject({
+      resultFix: "recovered-after-exit",
+      output: expect.objectContaining({
+        verdict: "pass",
+        error: CRASH.message,
+      }),
+    });
+    expect(logs).toContain("agent 进程异常退出，平台按它已写好的结果收下");
+  });
+
+  it("Recheck: an abnormal exit with an invalid result is a job failure", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.ts": "export const n = 1;\n",
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit({ "src/a.ts": "export const n = 2;\n" }, "spec work");
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/S-12-update"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/S-12-update"]);
+    const runner = new FakeAgentRunner(slotDir, () => ({
+      resultFile: { verdict: "pass" },
+      error: CRASH,
+    }));
+    await expect(
+      recheck(
+        deps(runner),
+        context(
+          bundleFor({
+            stage: "recheck",
+            ticket: null,
+            agentBranch: "agent/S-12-update",
+            integrationBranch: "spec/s",
+          }),
+        ),
+        repo.dir,
+        slot("agent/S-12-update"),
+      ),
+    ).rejects.toBeInstanceOf(InfrastructureError);
   });
 });

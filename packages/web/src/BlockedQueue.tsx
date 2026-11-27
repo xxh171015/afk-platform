@@ -486,6 +486,7 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
     seconds >= 1 &&
     Number(hours) <= MAX_EXTRA_HOURS;
   const budget = spec.reason === "budget-exhausted";
+  const baseline = spec.reason === "baseline-gate-failed";
   const retry = useAction(async (extraSeconds?: number) => {
     const { data, error } = await api.POST("/specs/{id}/resume", {
       params: { path: { id: spec.id } },
@@ -518,12 +519,19 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
     });
     if (!data) throw new Error(describeError(error));
   });
+  const continueBaseline = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/continue-baseline", {
+      params: { path: { id: spec.id } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
   const busy =
     retry.isPending ||
     allow.isPending ||
     cancel.isPending ||
     approveRemoved.isPending ||
-    approveRecheck.isPending;
+    approveRecheck.isPending ||
+    continueBaseline.isPending;
   return (
     <Card
       category="paused"
@@ -544,6 +552,7 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
             className="flex flex-wrap items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
+              if (baseline) return;
               if (budget) {
                 if (valid) retry.mutate(seconds);
               } else retry.mutate(undefined);
@@ -569,25 +578,40 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
                 小时 agent 时间
               </label>
             ) : null}
-            <Button
-              type="submit"
-              size="sm"
-              disabled={busy || (budget && !valid)}
-            >
-              <Spinner on={retry.isPending} />
-              {!retry.isPending && <Play />}
-              重试
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => allow.mutate()}
-            >
-              <Spinner on={allow.isPending} />
-              放行
-            </Button>
+            {baseline ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                onClick={() => continueBaseline.mutate()}
+              >
+                <Spinner on={continueBaseline.isPending} />
+                {!continueBaseline.isPending && <Play />}
+                不管它继续
+              </Button>
+            ) : (
+              <>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={busy || (budget && !valid)}
+                >
+                  <Spinner on={retry.isPending} />
+                  {!retry.isPending && <Play />}
+                  重试
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => allow.mutate()}
+                >
+                  <Spinner on={allow.isPending} />
+                  放行
+                </Button>
+              </>
+            )}
             {spec.reason === "tests-removed" ? (
               <Button
                 type="button"
@@ -624,7 +648,8 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
                 retry.error ??
                 allow.error ??
                 cancel.error ??
-                approveRemoved.error
+                approveRemoved.error ??
+                continueBaseline.error
               }
             />
           </form>
@@ -658,6 +683,26 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
     >
       <WaitingMeta blocking={spec.blocking} waitingSince={spec.waitingSince} />
       <p>{pauseReasonLabel(spec.reason)}</p>
+      {(spec.baselineFailures ?? []).map((failure) => (
+        <p key={failure.repo} className="text-muted-foreground">
+          {failure.repo}
+          {failure.reasons.length > 0 ? `：${failure.reasons.join("; ")}` : ""}
+          {failure.failingTests.length > 0
+            ? ` · ${failure.failingTests.join(", ")}`
+            : ""}
+          {failure.run ? (
+            <>
+              {" "}
+              <a
+                href={paths.run(failure.run.id)}
+                className="text-primary underline"
+              >
+                {failure.run.displayId}
+              </a>
+            </>
+          ) : null}
+        </p>
+      ))}
     </Card>
   );
 }
